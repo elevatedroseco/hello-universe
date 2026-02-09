@@ -133,12 +133,13 @@ export const UnitCard = forwardRef<HTMLDivElement, UnitCardProps>(
         </Button>
       )}
 
-      {/* Checkbox for custom units */}
-      {isCustom && !isHovered && (
+      {/* Checkbox for custom units - always visible */}
+      {isCustom && (
         <div className="absolute top-3 left-3 z-20">
           <Checkbox
             checked={isSelected}
             onCheckedChange={() => toggleSelection(unit.id)}
+            onClick={(e) => e.stopPropagation()}
             className="border-modded-gold data-[state=checked]:bg-modded-gold data-[state=checked]:border-modded-gold"
           />
         </div>
