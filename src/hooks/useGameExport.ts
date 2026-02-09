@@ -161,18 +161,32 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       setExportProgress(30, 'Extracting game archive...');
       const zip = await JSZip.loadAsync(skeletonBlob);
 
-      // Step 3: Extract and parse original INI files
-      setExportProgress(35, 'Reading original rules.ini...');
+      // Step 3: Detect ZIP directory prefix (skeleton may nest files in a subdirectory)
+      setExportProgress(33, 'Scanning archive structure...');
       
-      const rulesFile = zip.file('rules.ini');
-      const artFile = zip.file('art.ini');
+      const rulesMatches = zip.file(/rules\.ini$/i);
+      const artMatches = zip.file(/art\.ini$/i);
       
-      if (!rulesFile) {
+      if (rulesMatches.length === 0) {
+        // Debug: log all paths in ZIP to help diagnose
+        const allPaths = Object.keys(zip.files).slice(0, 30);
+        console.error('❌ Could not find rules.ini in ZIP. Paths found:', allPaths);
         throw new Error('Skeleton is missing rules.ini - invalid game package');
       }
-      if (!artFile) {
+      if (artMatches.length === 0) {
         throw new Error('Skeleton is missing art.ini - invalid game package');
       }
+
+      const rulesFile = rulesMatches[0];
+      const artFile = artMatches[0];
+      
+      // Extract the directory prefix from the rules.ini path (e.g. "ts_base_skeleton/")
+      const rulesPath = rulesFile.name;
+      const prefix = rulesPath.substring(0, rulesPath.lastIndexOf('/') + 1);
+      console.log(`📁 Detected ZIP prefix: "${prefix || '(root)'}"`);
+
+      // Step 4: Extract and parse original INI files
+      setExportProgress(35, 'Reading original rules.ini...');
 
       const originalRulesText = await rulesFile.async('string');
       const originalArtText = await artFile.async('string');
@@ -180,7 +194,7 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       console.log(`📄 Original rules.ini: ${originalRulesText.length} chars (~${(originalRulesText.length / 1024).toFixed(0)} KB)`);
       console.log(`📄 Original art.ini: ${originalArtText.length} chars (~${(originalArtText.length / 1024).toFixed(0)} KB)`);
 
-      // Step 4: Parse INI files into structured objects
+      // Step 5: Parse INI files into structured objects
       setExportProgress(40, 'Parsing game configuration...');
       const rulesData = TiberianSunINIParser.parse(originalRulesText);
       const artData = TiberianSunINIParser.parse(originalArtText);
@@ -188,20 +202,20 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       console.log(`📄 Parsed ${rulesData.sectionOrder.length} sections from rules.ini`);
       console.log(`📄 Parsed ${artData.sectionOrder.length} sections from art.ini`);
 
-      // Step 5: Inject custom units into type lists
+      // Step 6: Inject custom units into type lists
       setExportProgress(45, 'Adding units to build lists...');
       console.log(`🔧 Injecting ${selectedUnits.length} custom units...`);
       const rulesWithLists = TiberianSunINIParser.injectUnits(rulesData, selectedUnits);
 
-      // Step 6: Add unit definition sections
+      // Step 7: Add unit definition sections
       setExportProgress(50, 'Adding unit definitions...');
       const rulesComplete = TiberianSunINIParser.addUnitDefinitions(rulesWithLists, selectedUnits);
 
-      // Step 7: Add art definition sections
+      // Step 8: Add art definition sections
       setExportProgress(55, 'Adding art definitions...');
       const artComplete = TiberianSunINIParser.addArtDefinitions(artData, selectedUnits);
 
-      // Step 8: Regenerate complete INI files
+      // Step 9: Regenerate complete INI files
       setExportProgress(60, 'Generating modified rules.ini...');
       const finalRulesText = TiberianSunINIParser.stringify(rulesComplete);
       
@@ -211,11 +225,11 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       console.log(`📄 Final rules.ini: ${finalRulesText.length} chars (~${(finalRulesText.length / 1024).toFixed(0)} KB)`);
       console.log(`📄 Final art.ini: ${finalArtText.length} chars (~${(finalArtText.length / 1024).toFixed(0)} KB)`);
 
-      // Step 9: Replace INI files in ZIP
+      // Step 10: Replace INI files in ZIP (using detected prefix)
       setExportProgress(65, 'Updating game files...');
-      zip.file('rules.ini', finalRulesText);
-      zip.file('art.ini', finalArtText);
-      console.log('✅ Replaced rules.ini and art.ini with modded versions');
+      zip.file(`${prefix}rules.ini`, finalRulesText);
+      zip.file(`${prefix}art.ini`, finalArtText);
+      console.log(`✅ Replaced ${prefix}rules.ini and ${prefix}art.ini with modded versions`);
 
       // Step 10: Download and add .SHP files to root
       setExportProgress(68, 'Downloading unit graphics...');
@@ -244,8 +258,8 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
             if (!error && data) {
               // CRITICAL: 8.3 filename format (max 8 chars before extension)
               const shpName = unit.internalName.substring(0, 8).toUpperCase();
-              zip.file(`${shpName}.SHP`, data);
-              console.log(`✅ Added ${shpName}.SHP to root folder`);
+              zip.file(`${prefix}${shpName}.SHP`, data);
+              console.log(`✅ Added ${prefix}${shpName}.SHP`);
             } else {
               console.warn(`⚠️ Could not download SHP for ${unit.internalName}:`, error);
             }
@@ -258,8 +272,8 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       // Step 11: Generate installation guide
       setExportProgress(88, 'Creating installation guide...');
       const readme = generateInstallationGuide(selectedUnits);
-      zip.file('MOD_INSTALL.txt', readme);
-      console.log('✅ Created MOD_INSTALL.txt');
+      zip.file(`${prefix}MOD_INSTALL.txt`, readme);
+      console.log(`✅ Created ${prefix}MOD_INSTALL.txt`);
 
       // Step 12: Compress and download
       setExportProgress(90, 'Compressing final package...');

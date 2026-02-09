@@ -43,7 +43,13 @@ function getPreviewImageUrls(unit: Unit): { primary?: string; fallback?: string 
         const cleanPath = customUnit.shpFilePath
           .replace(/^user_assets\//, '') // Remove leading bucket name if present
           .replace(/\.(shp|png)$/i, ''); // Remove extension
-        return { primary: `${SUPABASE_URL}/storage/v1/object/public/user_assets/${cleanPath}.png` };
+        const primaryUrl = `${SUPABASE_URL}/storage/v1/object/public/user_assets/${cleanPath}.png`;
+        // Fallback: try lowercase version in case of case sensitivity mismatch
+        const lowercasePath = cleanPath.toLowerCase();
+        const fallbackUrl = lowercasePath !== cleanPath
+          ? `${SUPABASE_URL}/storage/v1/object/public/user_assets/${lowercasePath}.png`
+          : undefined;
+        return { primary: primaryUrl, fallback: fallbackUrl };
       }
     }
   }
