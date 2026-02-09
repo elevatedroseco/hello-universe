@@ -1,47 +1,56 @@
-import { motion } from "framer-motion";
+import { Header } from '@/components/Header';
+import { FactionTabs } from '@/components/FactionTabs';
+import { CategoryTabs } from '@/components/CategoryTabs';
+import { UnitGrid } from '@/components/UnitGrid';
+import { ExportSection } from '@/components/ExportSection';
+import { FloatingActionButton } from '@/components/FloatingActionButton';
+import { UnitEditorDrawer } from '@/components/UnitEditorDrawer';
+import { useCustomUnits } from '@/hooks/useCustomUnits';
+import { Toaster } from '@/components/ui/sonner';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 const Index = () => {
+  const { customUnits, addUnit, isCreating, error, isConfigMissing } = useCustomUnits();
+
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6">
-      <motion.div
-        className="text-center"
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-      >
-        <motion.p
-          className="mb-4 text-sm font-medium uppercase tracking-[0.3em] text-muted-foreground"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3, duration: 0.6 }}
-        >
-          Welcome
-        </motion.p>
+    <div className="min-h-screen flex flex-col bg-background">
+      <Header />
+      
+      <main className="flex-1 container mx-auto px-4 py-6">
+        {error && (
+          <div className="mb-6">
+            <Alert variant="destructive">
+              <AlertTitle>Custom units unavailable</AlertTitle>
+              <AlertDescription>
+                <p className="mb-2">
+                  The app can’t connect to your backend because the frontend is missing environment variables.
+                </p>
+                <p className="font-mono text-xs break-all">
+                  {error instanceof Error ? error.message : String(error)}
+                </p>
+                <p className="mt-2">
+                  Please ensure <span className="font-mono">VITE_SUPABASE_URL</span> and{' '}
+                  <span className="font-mono">VITE_SUPABASE_ANON_KEY</span> are configured for the preview environment, then refresh.
+                </p>
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
 
-        <h1 className="font-display text-7xl leading-tight text-foreground sm:text-8xl md:text-9xl">
-          Hello
-          <span className="text-primary">,</span>
-          <br />
-          World
-          <span className="text-primary">.</span>
-        </h1>
+        {/* Controls Row */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+          <FactionTabs />
+          <CategoryTabs />
+        </div>
 
-        <motion.div
-          className="mx-auto mt-8 h-px w-16 bg-primary"
-          initial={{ scaleX: 0 }}
-          animate={{ scaleX: 1 }}
-          transition={{ delay: 0.6, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-        />
+        {/* Unit Grid */}
+        <UnitGrid customUnits={customUnits} isConfigMissing={isConfigMissing} />
+      </main>
 
-        <motion.p
-          className="mx-auto mt-6 max-w-md font-body text-lg font-light leading-relaxed text-muted-foreground"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.8, duration: 0.6 }}
-        >
-          A blank canvas, ready for your next great idea.
-        </motion.p>
-      </motion.div>
+      <ExportSection customUnits={customUnits} />
+      <FloatingActionButton />
+      <UnitEditorDrawer onUnitCreated={addUnit} isCreating={isCreating} />
+      <Toaster />
     </div>
   );
 };

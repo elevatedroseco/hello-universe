@@ -14,8 +14,8 @@ export default {
     },
     extend: {
       fontFamily: {
-        display: ['DM Serif Display', 'serif'],
-        body: ['Inter', 'sans-serif'],
+        display: ['Orbitron', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -61,6 +61,15 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        // Faction colors
+        "gdi-blue": "hsl(var(--gdi-blue))",
+        "gdi-blue-glow": "hsl(var(--gdi-blue-glow))",
+        "nod-red": "hsl(var(--nod-red))",
+        "nod-red-glow": "hsl(var(--nod-red-glow))",
+        "mutant-green": "hsl(var(--mutant-green))",
+        "mutant-green-glow": "hsl(var(--mutant-green-glow))",
+        "modded-gold": "hsl(var(--modded-gold))",
+        "modded-gold-glow": "hsl(var(--modded-gold-glow))",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -76,10 +85,20 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        pulse: {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.5" },
+        },
+        glow: {
+          "0%, 100%": { boxShadow: "0 0 20px hsl(var(--modded-gold) / 0.3)" },
+          "50%": { boxShadow: "0 0 30px hsl(var(--modded-gold) / 0.5)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        pulse: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+        glow: "glow 2s ease-in-out infinite",
       },
     },
   },
