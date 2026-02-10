@@ -21,6 +21,7 @@ export interface DefaultUnit extends BaseUnit {
 export interface CustomUnit extends BaseUnit {
   type: 'custom';
   shpFilePath?: string;
+  icon_file_path?: string;
   voxelFilePath?: string;
   cameoFilePath?: string;
   previewImageUrl?: string;

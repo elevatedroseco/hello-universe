@@ -304,13 +304,19 @@ export class TiberianSunINIParser {
     for (const unit of units) {
       const art = (unit.artJson || {}) as Record<string, unknown>;
       const unitName = unit.internalName.toUpperCase();
-      const iconName = (unitName + 'ICON').substring(0, 8).toUpperCase();
+      const iconName = (unitName.substring(0, 4) + 'ICON').toUpperCase();
 
       // Image MUST match the SHP filename (without extension), always uppercase
       modified[unitName] = {
         Image: unitName,
-        Cameo: (art.Cameo || iconName).toString()
       };
+
+      // Only add Cameo if unit has an icon file
+      if (unit.icon_file_path) {
+        modified[unitName].Cameo = iconName;
+      } else if (art.Cameo) {
+        modified[unitName].Cameo = String(art.Cameo);
+      }
 
       if (unit.category === 'Infantry') {
         Object.assign(modified[unitName], {
