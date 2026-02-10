@@ -8,10 +8,11 @@ interface ParsedINI {
   [section: string]: INISection;
 }
 
-// Track section order for proper serialization
+// Track section order and raw lines for lossless serialization
 interface ParseResult {
   data: ParsedINI;
   sectionOrder: string[];
+  rawLines: string[];  // preserve original file verbatim
 }
 
 /**
@@ -29,12 +30,12 @@ export class TiberianSunINIParser {
     const sectionOrder: string[] = [];
     let currentSection = '';
 
-    const lines = iniText.split(/\r?\n/);
+    const rawLines = iniText.split(/\r?\n/);
 
-    for (const line of lines) {
+    for (const line of rawLines) {
       const trimmed = line.trim();
 
-      // Skip empty lines and comments
+      // Skip empty lines and comments (but they're kept in rawLines)
       if (!trimmed || trimmed.startsWith(';')) {
         continue;
       }
@@ -64,47 +65,84 @@ export class TiberianSunINIParser {
       }
     }
 
-    return { data, sectionOrder };
+    return { data, sectionOrder, rawLines };
   }
 
   /**
    * Convert parsed INI back to text format
    */
   static stringify(parseResult: ParseResult): string {
-    const { data, sectionOrder } = parseResult;
-    let output = '';
+    const { data, sectionOrder, rawLines } = parseResult;
+    
+    // Start with original file content (preserving comments, blank lines, formatting)
+    let output = rawLines.join('\n');
+    
+    // Add mod kit header at the top
+    const header = '; ===============================================\n'
+      + '; Modified by TibSun Mod Kit\n'
+      + `; Generated: ${new Date().toISOString()}\n`
+      + '; ===============================================\n\n';
+    output = header + output;
 
-    // Generate header comment
-    output += '; ===============================================\n';
-    output += '; Tiberian Sun Rules - Modified by TibSun Mod Kit\n';
-    output += `; Generated: ${new Date().toISOString()}\n`;
-    output += '; ===============================================\n\n';
-
-    // Process sections in original order
-    for (const sectionName of sectionOrder) {
-      const section = data[sectionName];
-      if (!section) continue;
-
-      output += `[${sectionName}]\n`;
-
-      for (const [key, value] of Object.entries(section)) {
-        output += `${key}=${value}\n`;
-      }
-
-      output += '\n';
-    }
-
-    // Add any new sections not in original order (custom units)
+    // Append any NEW sections not in original (custom unit definitions)
     for (const sectionName of Object.keys(data)) {
       if (!sectionOrder.includes(sectionName)) {
         const section = data[sectionName];
-        output += `[${sectionName}]\n`;
+        output += `\n[${sectionName}]\n`;
 
         for (const [key, value] of Object.entries(section)) {
           output += `${key}=${value}\n`;
         }
+      }
+    }
 
-        output += '\n';
+    // Also append modifications to existing sections (new entries in type lists)
+    // We need to find type list sections and append new indices
+    for (const sectionName of sectionOrder) {
+      const section = data[sectionName];
+      if (!section) continue;
+      
+      // Check if this section has new numeric keys added by injectUnits
+      // by comparing against what was originally parsed
+      // For simplicity, we re-scan rawLines to find existing keys
+      const existingKeys = new Set<string>();
+      let inSection = false;
+      for (const line of rawLines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('[') && trimmed.includes(']')) {
+          const name = trimmed.slice(1, trimmed.indexOf(']'));
+          inSection = (name === sectionName);
+          continue;
+        }
+        if (inSection && trimmed.includes('=')) {
+          const key = trimmed.slice(0, trimmed.indexOf('=')).trim();
+          existingKeys.add(key);
+        }
+      }
+      
+      // Find new keys that weren't in the original
+      const newEntries: string[] = [];
+      for (const [key, value] of Object.entries(section)) {
+        if (!existingKeys.has(key)) {
+          newEntries.push(`${key}=${value}`);
+        }
+      }
+      
+      if (newEntries.length > 0) {
+        // Find the section in output and append new entries at the end of it
+        const sectionHeader = `[${sectionName}]`;
+        const sectionIdx = output.indexOf(sectionHeader);
+        if (sectionIdx !== -1) {
+          // Find next section or end of file
+          const afterHeader = sectionIdx + sectionHeader.length;
+          const nextSectionMatch = output.substring(afterHeader).search(/^\[/m);
+          const insertPos = nextSectionMatch !== -1 
+            ? afterHeader + nextSectionMatch 
+            : output.length;
+          
+          const insertion = newEntries.join('\n') + '\n';
+          output = output.substring(0, insertPos) + insertion + output.substring(insertPos);
+        }
       }
     }
 
@@ -172,7 +210,7 @@ export class TiberianSunINIParser {
       }
     }
 
-    return { data: modified, sectionOrder };
+    return { data: modified, sectionOrder, rawLines: parseResult.rawLines };
   }
 
   /**
@@ -288,7 +326,7 @@ export class TiberianSunINIParser {
       console.log(`✅ Added unit definition: [${unitName}]`);
     }
 
-    return { data: modified, sectionOrder };
+    return { data: modified, sectionOrder, rawLines: parseResult.rawLines };
   }
 
   /**
@@ -346,6 +384,6 @@ export class TiberianSunINIParser {
       console.log(`✅ Added art definition: [${unitName}]`);
     }
 
-    return { data: modified, sectionOrder };
+    return { data: modified, sectionOrder, rawLines: parseResult.rawLines };
   }
 }

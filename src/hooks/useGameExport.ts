@@ -128,9 +128,24 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       const artFile = artMatches[0];
 
       // Determine path prefix (skeleton may have a wrapper directory)
+      // Determine the game root prefix (where Game.exe lives)
+      // rules.ini might be nested (e.g. ts_base_skeleton/INI/rules.ini)
+      // but ecache99.mix and final INIs must go at the same level as Game.exe
       const rulesPath = rulesFile.name;
-      const prefix = rulesPath.substring(0, rulesPath.lastIndexOf('/') + 1);
-      console.log(`📁 ZIP prefix: "${prefix || '(root)'}"`);
+      const iniPrefix = rulesPath.substring(0, rulesPath.lastIndexOf('/') + 1);
+      
+      // Find the game root by looking for Game.exe or the top-level directory
+      const gameExeMatch = zip.file(/Game\.exe$/i);
+      let gameRoot = '';
+      if (gameExeMatch.length > 0) {
+        const exePath = gameExeMatch[0].name;
+        gameRoot = exePath.substring(0, exePath.lastIndexOf('/') + 1);
+      } else {
+        // Fallback: use parent of INI prefix, or just the first directory
+        gameRoot = iniPrefix.split('/').slice(0, -2).join('/');
+        if (gameRoot) gameRoot += '/';
+      }
+      console.log(`📁 INI prefix: "${iniPrefix}", Game root: "${gameRoot || '(root)'}"`);
 
       const originalRules = await rulesFile.async('string');
       const originalArt = await artFile.async('string');
@@ -149,9 +164,9 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       const withArtDefs = TiberianSunINIParser.addArtDefinitions(artData, selectedUnits);
       const finalArt = TiberianSunINIParser.stringify(withArtDefs);
 
-      // Write merged INI files back into ZIP at root level
-      zip.file(`${prefix}rules.ini`, finalRules);
-      zip.file(`${prefix}art.ini`, finalArt);
+      // Write merged INI files at game root (where Game.exe lives)
+      zip.file(`${gameRoot}rules.ini`, finalRules);
+      zip.file(`${gameRoot}art.ini`, finalArt);
       console.log(`✅ Wrote merged rules.ini (${(finalRules.length / 1024).toFixed(0)} KB) and art.ini (${(finalArt.length / 1024).toFixed(0)} KB)`);
 
       // ── F: Download SHP files ─────────────────────────────
@@ -186,17 +201,17 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
         shpProgress += perUnit;
       }
 
-      // ── G: Build ecache99.mix ─────────────────────────────
+      // ── G: Build ecache99.mix at game root ────────────────
       if (shpFiles.length > 0) {
         setExportProgress(80, `Building ecache99.mix (${shpFiles.length} sprites)...`);
         const mixData = buildEcacheMix(shpFiles);
-        zip.file(`${prefix}ecache99.mix`, mixData);
+        zip.file(`${gameRoot}ecache99.mix`, mixData);
         console.log(`✅ ecache99.mix: ${(mixData.byteLength / 1024).toFixed(0)} KB, ${shpFiles.length} files`);
       }
 
       // ── H: README ─────────────────────────────────────────
       setExportProgress(88, 'Writing installation guide...');
-      zip.file(`${prefix}MOD_README.txt`, generateReadme(selectedUnits));
+      zip.file(`${gameRoot}MOD_README.txt`, generateReadme(selectedUnits));
 
       // ── I: Compress + download ────────────────────────────
       setExportProgress(90, 'Compressing final package...');
