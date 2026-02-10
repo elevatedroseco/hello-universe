@@ -242,13 +242,11 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
         const progress = 68 + Math.floor((unitIndex / selectedUnits.length) * 17);
         setExportProgress(progress, `Adding ${unit.displayName}...`);
 
+        // Download main SHP file
         if (unit.shpFilePath && isSupabaseConfigured && supabase) {
           try {
-            // Determine bucket based on path prefix
             const isPpmAsset = unit.shpFilePath.toLowerCase().startsWith('ppm/');
             const bucketName = isPpmAsset ? 'asset-previews' : 'user_assets';
-            
-            // Clean the path
             const cleanPath = unit.shpFilePath
               .replace(/^user_assets\//, '')
               .replace(/^asset-previews\//, '');
@@ -257,9 +255,7 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
               .from(bucketName)
               .download(cleanPath);
 
-            // Fallback: if download fails and path doesn't start with units/, try with units/ prefix
             if (error && !cleanPath.startsWith('units/')) {
-              console.log(`🔄 Retrying SHP download with units/ prefix: units/${cleanPath}`);
               const retry = await supabase.storage
                 .from(bucketName)
                 .download(`units/${cleanPath}`);
@@ -268,7 +264,6 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
             }
 
             if (!error && data) {
-              // CRITICAL: 8.3 filename format (max 8 chars before extension)
               const shpName = unit.internalName.substring(0, 8).toUpperCase();
               zip.file(`${rootPrefix}${shpName}.SHP`, data);
               console.log(`✅ Added ${rootPrefix}${shpName}.SHP`);
@@ -277,6 +272,39 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
             }
           } catch (err) {
             console.warn(`⚠️ Error downloading SHP for ${unit.internalName}:`, err);
+          }
+        }
+
+        // Download icon/cameo SHP file
+        if (unit.icon_file_path && isSupabaseConfigured && supabase) {
+          try {
+            const isPpmAsset = unit.icon_file_path.toLowerCase().startsWith('ppm/');
+            const bucketName = isPpmAsset ? 'asset-previews' : 'user_assets';
+            const cleanPath = unit.icon_file_path
+              .replace(/^user_assets\//, '')
+              .replace(/^asset-previews\//, '');
+            
+            let { data, error } = await supabase.storage
+              .from(bucketName)
+              .download(cleanPath);
+
+            if (error && !cleanPath.startsWith('units/')) {
+              const retry = await supabase.storage
+                .from(bucketName)
+                .download(`units/${cleanPath}`);
+              data = retry.data;
+              error = retry.error;
+            }
+
+            if (!error && data) {
+              const iconName = (unit.internalName.substring(0, 4) + 'ICON').toUpperCase();
+              zip.file(`${rootPrefix}${iconName}.SHP`, data);
+              console.log(`✅ Added cameo ${rootPrefix}${iconName}.SHP`);
+            } else {
+              console.warn(`⚠️ Could not download icon for ${unit.internalName}:`, error);
+            }
+          } catch (err) {
+            console.warn(`⚠️ Error downloading icon for ${unit.internalName}:`, err);
           }
         }
       }
