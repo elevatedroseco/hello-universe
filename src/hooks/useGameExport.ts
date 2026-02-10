@@ -5,351 +5,218 @@ import { useUnitSelection } from '@/store/useUnitSelection';
 import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
 import { CustomUnit } from '@/types/units';
 import { TiberianSunINIParser } from '@/lib/iniParser';
+import { buildEcacheMix, MixFileEntry } from '@/lib/mixBuilder';
 
 const SKELETON_URL = 'https://pub-2779116bf9b04734a8ce304c271ce31b.r2.dev/ts_base_skeleton.zip';
 
 /**
+ * Download a file from Supabase storage with bucket/path auto-detection and retry.
+ */
+async function downloadFromStorage(filePath: string): Promise<Blob | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+
+  const isPpmAsset = filePath.toLowerCase().startsWith('ppm/');
+  const bucketName = isPpmAsset ? 'asset-previews' : 'user_assets';
+  const cleanPath = filePath
+    .replace(/^user_assets\//, '')
+    .replace(/^asset-previews\//, '');
+
+  let { data, error } = await supabase.storage.from(bucketName).download(cleanPath);
+
+  // Retry with units/ prefix
+  if (error && !cleanPath.startsWith('units/')) {
+    const retry = await supabase.storage.from(bucketName).download(`units/${cleanPath}`);
+    data = retry.data;
+    error = retry.error;
+  }
+
+  if (error || !data) {
+    console.warn(`⚠️ Storage download failed for ${filePath}:`, error);
+    return null;
+  }
+  return data;
+}
+
+/**
  * Generate installation instructions
  */
-function generateInstallationGuide(units: CustomUnit[]): string {
-  return `
-==============================================================
-  TIBERIAN SUN CUSTOM MOD - Installation Guide
+function generateReadme(units: CustomUnit[]): string {
+  return `==============================================================
+  TIBERIAN SUN CUSTOM MOD — Installation Guide
 ==============================================================
 
 Generated: ${new Date().toLocaleString()}
 Custom Units: ${units.length}
 
 WHAT'S INCLUDED:
-----------------
-✅ rules.ini - COMPLETE file (original game + ${units.length} custom units)
-✅ art.ini - COMPLETE file (original game + custom unit art)
-✅ ${units.length} .SHP files (unit sprites)
-✅ All original game content PRESERVED
-
-FILE INTEGRITY:
----------------
-This mod uses the PROPER Tiberian Sun modding method:
-✅ Original units: E1, E2, Titan, Wolverine, etc. (ALL INTACT)
-✅ Custom units: Added to end of build lists
-✅ Base game fully playable
-✅ Custom units appear when prerequisites met
+  ✅ rules.ini  — MERGED (original game + ${units.length} custom units)
+  ✅ art.ini    — MERGED (original game + custom unit art)
+  ✅ ecache99.mix — Custom unit sprites & icons (SHP files)
+  ✅ All original game content PRESERVED
 
 INSTALLATION:
--------------
-1. BACKUP YOUR GAME (recommended)
-   - Copy your TS folder to "TibSun_Backup" first
+  1. Extract this ZIP into your Tiberian Sun folder
+     (where Game.exe lives, e.g. C:\\Games\\TibSun\\)
+  2. Overwrite when prompted — original content is preserved inside the files.
+  3. Launch the game normally.
 
-2. Extract this ZIP to your Tiberian Sun folder:
-   Examples:
-   - C:\\Games\\TibSun\\
-   - C:\\CnCNet\\TibSun\\
-   - Wherever Game.exe is located
-
-3. When prompted to overwrite:
-   - Click "YES TO ALL"
-   - This replaces rules.ini and art.ini with modded versions
-   - Original content is preserved within the files!
-
-4. Launch the game normally:
-   - Game.exe or ts-spawn.exe or CnCNet launcher
-
-5. Start Skirmish or Multiplayer
-
-6. Build your custom units!
+HOW IT WORKS:
+  • rules.ini and art.ini in the root folder override the versions
+    inside tibsun.mix / patch.mix (engine priority).
+  • ecache99.mix is scanned automatically by the engine for SHP files.
+  • No original MIX archives are modified.
 
 CUSTOM UNITS:
--------------
-${units.map((u, i) => `${i + 1}. ${u.displayName} (${u.internalName})
-   Faction: ${u.faction}
-   Type: ${u.category}
-   Cost: $${u.cost}
-   Tech Level: ${u.techLevel}
-   Unlocks with: ${
-     u.category === 'Infantry' 
-       ? (u.faction === 'GDI' ? 'Barracks' : 'Hand of Nod')
-       : (u.faction === 'GDI' ? 'War Factory' : 'War Factory')
-   }`).join('\n\n')}
+${units.map((u, i) => `  ${i + 1}. ${u.displayName} (${u.internalName}) — ${u.faction} ${u.category}, $${u.cost}`).join('\n')}
 
 VERIFICATION:
--------------
-After installation:
-1. Check that rules.ini and art.ini are in your TS root folder
-2. Check file sizes:
-   - rules.ini should be ~500-700 KB (original ~500KB + custom)
-   - art.ini should be ~300-400 KB (original ~300KB + custom)
-3. Launch game
-4. Start skirmish as ${units[0]?.faction || 'GDI'}
-5. Build prerequisite building
-6. Custom units appear in sidebar!
+  1. rules.ini should be ~500–700 KB
+  2. art.ini   should be ~300–400 KB
+  3. ecache99.mix should exist in the root folder
+  4. Start skirmish, build prerequisite, see custom units in sidebar.
 
-TROUBLESHOOTING:
-----------------
-Q: Custom units don't appear?
-A: Build the prerequisite building first
-
-Q: Game crashes on startup?
-A: One of the .SHP files may be corrupted - check file sizes
-
-Q: Units visible but no graphics?
-A: Verify .SHP files are in ROOT folder (not in subfolders)
-
-Q: Want to remove mod?
-A: Delete rules.ini and art.ini, game loads originals from MIX
+REVERTING:
+  Delete rules.ini, art.ini, and ecache99.mix from the root folder.
+  The game falls back to originals inside its MIX archives.
 
 MULTIPLAYER:
-------------
-⚠️  All players need IDENTICAL rules.ini for multiplayer
-⚠️  Share this ZIP with opponents before playing
-⚠️  CnCNet supports custom rules - enable in lobby
+  ⚠️  All players need identical rules.ini + ecache99.mix.
 
-REVERTING TO VANILLA:
----------------------
-1. Delete rules.ini from root folder
-2. Delete art.ini from root folder
-3. Game will load original files from MIX archives
-4. Or restore from your backup folder
-
-CREATED WITH:
--------------
-TibSun Mod Kit - https://tibsunmod.lovable.app
-
-Enjoy your custom units! 🎮
+Created with TibSun Mod Kit — https://tibsunmod.lovable.app
 `;
 }
 
 export const useGameExport = (customUnits: CustomUnit[]) => {
-  const { 
-    selectedUnitIds, 
-    setExporting, 
-    setExportProgress, 
-    resetExport 
+  const {
+    selectedUnitIds,
+    setExporting,
+    setExportProgress,
+    resetExport
   } = useUnitSelection();
 
   const exportGame = useCallback(async () => {
-    if (selectedUnitIds.size === 0) {
-      console.warn('No units selected for export');
-      return;
-    }
+    if (selectedUnitIds.size === 0) return;
 
     const selectedUnits = customUnits.filter(u => selectedUnitIds.has(u.id));
-    
-    if (selectedUnits.length === 0) {
-      console.warn('Selected unit IDs do not match any custom units');
-      return;
-    }
+    if (selectedUnits.length === 0) return;
 
     try {
       setExporting(true);
-      setExportProgress(5, 'Initializing export...');
 
-      // Step 1: Fetch base game skeleton from R2
-      setExportProgress(10, 'Downloading base game (~200MB)...');
-      console.log('📦 Fetching skeleton from R2...');
-      
+      // ── A: Fetch skeleton ─────────────────────────────────
+      setExportProgress(5, 'Connecting to R2...');
       const response = await fetch(SKELETON_URL, { mode: 'cors' });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to download game skeleton: ${response.statusText}`);
-      }
+      if (!response.ok) throw new Error(`Skeleton fetch failed: ${response.statusText}`);
 
-      setExportProgress(25, 'Loading game engine...');
+      setExportProgress(15, 'Downloading base game (~200MB)...');
       const skeletonBlob = await response.blob();
-      console.log(`📦 Downloaded skeleton: ${(skeletonBlob.size / 1024 / 1024).toFixed(1)} MB`);
+      console.log(`📦 Skeleton: ${(skeletonBlob.size / 1024 / 1024).toFixed(1)} MB`);
 
-      // Step 2: Load skeleton into JSZip
-      setExportProgress(30, 'Extracting game archive...');
+      // ── B: Load ZIP ───────────────────────────────────────
+      setExportProgress(25, 'Unpacking skeleton...');
       const zip = await JSZip.loadAsync(skeletonBlob);
 
-      // Step 3: Detect ZIP directory prefix (skeleton may nest files in a subdirectory)
-      setExportProgress(33, 'Scanning archive structure...');
-      
+      // ── C: Read INI files from root ───────────────────────
+      setExportProgress(30, 'Reading game configuration...');
+
       const rulesMatches = zip.file(/rules\.ini$/i);
       const artMatches = zip.file(/art\.ini$/i);
-      
-      if (rulesMatches.length === 0) {
-        // Debug: log all paths in ZIP to help diagnose
-        const allPaths = Object.keys(zip.files).slice(0, 30);
-        console.error('❌ Could not find rules.ini in ZIP. Paths found:', allPaths);
-        throw new Error('Skeleton is missing rules.ini - invalid game package');
-      }
-      if (artMatches.length === 0) {
-        throw new Error('Skeleton is missing art.ini - invalid game package');
-      }
+      if (rulesMatches.length === 0) throw new Error('Skeleton missing rules.ini');
+      if (artMatches.length === 0) throw new Error('Skeleton missing art.ini');
 
       const rulesFile = rulesMatches[0];
       const artFile = artMatches[0];
-      
-      // Extract the directory prefix from the rules.ini path (e.g. "ts_base_skeleton/INI/")
+
+      // Determine path prefix (skeleton may have a wrapper directory)
       const rulesPath = rulesFile.name;
-      const iniPrefix = rulesPath.substring(0, rulesPath.lastIndexOf('/') + 1);
-      // SHP files go in the game root folder, not the INI subfolder
-      const rootPrefix = iniPrefix.replace(/INI\/$/i, '');
-      console.log(`📁 INI prefix: "${iniPrefix}", root prefix: "${rootPrefix || '(root)'}"`);
+      const prefix = rulesPath.substring(0, rulesPath.lastIndexOf('/') + 1);
+      console.log(`📁 ZIP prefix: "${prefix || '(root)'}"`);
 
-      // Step 4: Extract and parse original INI files
-      setExportProgress(35, 'Reading original rules.ini...');
+      const originalRules = await rulesFile.async('string');
+      const originalArt = await artFile.async('string');
+      console.log(`📄 rules.ini: ${(originalRules.length / 1024).toFixed(0)} KB, art.ini: ${(originalArt.length / 1024).toFixed(0)} KB`);
 
-      const originalRulesText = await rulesFile.async('string');
-      const originalArtText = await artFile.async('string');
-      
-      console.log(`📄 Original rules.ini: ${originalRulesText.length} chars (~${(originalRulesText.length / 1024).toFixed(0)} KB)`);
-      console.log(`📄 Original art.ini: ${originalArtText.length} chars (~${(originalArtText.length / 1024).toFixed(0)} KB)`);
+      // ── D: Parse + inject rules ───────────────────────────
+      setExportProgress(40, 'Merging unit definitions...');
+      const rulesData = TiberianSunINIParser.parse(originalRules);
+      const withLists = TiberianSunINIParser.injectUnits(rulesData, selectedUnits);
+      const withDefs = TiberianSunINIParser.addUnitDefinitions(withLists, selectedUnits);
+      const finalRules = TiberianSunINIParser.stringify(withDefs);
 
-      // Step 5: Parse INI files into structured objects
-      setExportProgress(40, 'Parsing game configuration...');
-      const rulesData = TiberianSunINIParser.parse(originalRulesText);
-      const artData = TiberianSunINIParser.parse(originalArtText);
-      
-      console.log(`📄 Parsed ${rulesData.sectionOrder.length} sections from rules.ini`);
-      console.log(`📄 Parsed ${artData.sectionOrder.length} sections from art.ini`);
+      // ── E: Parse + inject art ─────────────────────────────
+      setExportProgress(50, 'Merging art definitions...');
+      const artData = TiberianSunINIParser.parse(originalArt);
+      const withArtDefs = TiberianSunINIParser.addArtDefinitions(artData, selectedUnits);
+      const finalArt = TiberianSunINIParser.stringify(withArtDefs);
 
-      // Step 6: Inject custom units into type lists
-      setExportProgress(45, 'Adding units to build lists...');
-      console.log(`🔧 Injecting ${selectedUnits.length} custom units...`);
-      const rulesWithLists = TiberianSunINIParser.injectUnits(rulesData, selectedUnits);
+      // Write merged INI files back into ZIP at root level
+      zip.file(`${prefix}rules.ini`, finalRules);
+      zip.file(`${prefix}art.ini`, finalArt);
+      console.log(`✅ Wrote merged rules.ini (${(finalRules.length / 1024).toFixed(0)} KB) and art.ini (${(finalArt.length / 1024).toFixed(0)} KB)`);
 
-      // Step 7: Add unit definition sections
-      setExportProgress(50, 'Adding unit definitions...');
-      const rulesComplete = TiberianSunINIParser.addUnitDefinitions(rulesWithLists, selectedUnits);
+      // ── F: Download SHP files ─────────────────────────────
+      setExportProgress(55, 'Downloading unit graphics...');
+      const shpFiles: MixFileEntry[] = [];
+      const perUnit = 25 / selectedUnits.length;
+      let shpProgress = 55;
 
-      // Step 8: Add art definition sections
-      setExportProgress(55, 'Adding art definitions...');
-      const artComplete = TiberianSunINIParser.addArtDefinitions(artData, selectedUnits);
-
-      // Step 9: Regenerate complete INI files
-      setExportProgress(60, 'Generating modified rules.ini...');
-      const finalRulesText = TiberianSunINIParser.stringify(rulesComplete);
-      
-      setExportProgress(62, 'Generating modified art.ini...');
-      const finalArtText = TiberianSunINIParser.stringify(artComplete);
-      
-      console.log(`📄 Final rules.ini: ${finalRulesText.length} chars (~${(finalRulesText.length / 1024).toFixed(0)} KB)`);
-      console.log(`📄 Final art.ini: ${finalArtText.length} chars (~${(finalArtText.length / 1024).toFixed(0)} KB)`);
-
-      // Step 10: Replace INI files in ZIP (using detected prefix)
-      setExportProgress(65, 'Updating game files...');
-      zip.file(`${iniPrefix}rules.ini`, finalRulesText);
-      zip.file(`${iniPrefix}art.ini`, finalArtText);
-      console.log(`✅ Replaced ${iniPrefix}rules.ini and ${iniPrefix}art.ini with modded versions`);
-
-      // Step 10: Download and add .SHP files to root
-      setExportProgress(68, 'Downloading unit graphics...');
-      let unitIndex = 0;
-      
       for (const unit of selectedUnits) {
-        unitIndex++;
-        const progress = 68 + Math.floor((unitIndex / selectedUnits.length) * 17);
-        setExportProgress(progress, `Adding ${unit.displayName}...`);
+        setExportProgress(Math.floor(shpProgress), `Packaging ${unit.displayName}...`);
 
-        // Download main SHP file
-        if (unit.shpFilePath && isSupabaseConfigured && supabase) {
-          try {
-            const isPpmAsset = unit.shpFilePath.toLowerCase().startsWith('ppm/');
-            const bucketName = isPpmAsset ? 'asset-previews' : 'user_assets';
-            const cleanPath = unit.shpFilePath
-              .replace(/^user_assets\//, '')
-              .replace(/^asset-previews\//, '');
-            
-            let { data, error } = await supabase.storage
-              .from(bucketName)
-              .download(cleanPath);
-
-            if (error && !cleanPath.startsWith('units/')) {
-              const retry = await supabase.storage
-                .from(bucketName)
-                .download(`units/${cleanPath}`);
-              data = retry.data;
-              error = retry.error;
-            }
-
-            if (!error && data) {
-              const shpName = unit.internalName.substring(0, 8).toUpperCase();
-              zip.file(`${rootPrefix}${shpName}.SHP`, data);
-              console.log(`✅ Added ${rootPrefix}${shpName}.SHP`);
-            } else {
-              console.warn(`⚠️ Could not download SHP for ${unit.internalName}:`, error);
-            }
-          } catch (err) {
-            console.warn(`⚠️ Error downloading SHP for ${unit.internalName}:`, err);
+        // Main sprite
+        if (unit.shpFilePath) {
+          const blob = await downloadFromStorage(unit.shpFilePath);
+          if (blob) {
+            const name = unit.internalName.substring(0, 8).toUpperCase() + '.SHP';
+            shpFiles.push({ name, data: await blob.arrayBuffer() });
+            console.log(`✅ SHP: ${name}`);
           }
         }
 
-        // Download icon/cameo SHP file
-        if (unit.icon_file_path && isSupabaseConfigured && supabase) {
-          try {
-            const isPpmAsset = unit.icon_file_path.toLowerCase().startsWith('ppm/');
-            const bucketName = isPpmAsset ? 'asset-previews' : 'user_assets';
-            const cleanPath = unit.icon_file_path
-              .replace(/^user_assets\//, '')
-              .replace(/^asset-previews\//, '');
-            
-            let { data, error } = await supabase.storage
-              .from(bucketName)
-              .download(cleanPath);
-
-            if (error && !cleanPath.startsWith('units/')) {
-              const retry = await supabase.storage
-                .from(bucketName)
-                .download(`units/${cleanPath}`);
-              data = retry.data;
-              error = retry.error;
-            }
-
-            if (!error && data) {
-              const iconName = (unit.internalName.substring(0, 4) + 'ICON').toUpperCase();
-              zip.file(`${rootPrefix}${iconName}.SHP`, data);
-              console.log(`✅ Added cameo ${rootPrefix}${iconName}.SHP`);
-            } else {
-              console.warn(`⚠️ Could not download icon for ${unit.internalName}:`, error);
-            }
-          } catch (err) {
-            console.warn(`⚠️ Error downloading icon for ${unit.internalName}:`, err);
+        // Icon / cameo
+        if (unit.icon_file_path) {
+          const blob = await downloadFromStorage(unit.icon_file_path);
+          if (blob) {
+            const iconName = (unit.internalName.substring(0, 4) + 'ICON').toUpperCase() + '.SHP';
+            shpFiles.push({ name: iconName, data: await blob.arrayBuffer() });
+            console.log(`✅ Icon: ${iconName}`);
           }
         }
+
+        shpProgress += perUnit;
       }
 
-      // Step 11: Generate installation guide
-      setExportProgress(88, 'Creating installation guide...');
-      const readme = generateInstallationGuide(selectedUnits);
-      zip.file(`${rootPrefix}MOD_INSTALL.txt`, readme);
-      console.log(`✅ Created ${rootPrefix}MOD_INSTALL.txt`);
+      // ── G: Build ecache99.mix ─────────────────────────────
+      if (shpFiles.length > 0) {
+        setExportProgress(80, `Building ecache99.mix (${shpFiles.length} sprites)...`);
+        const mixData = buildEcacheMix(shpFiles);
+        zip.file(`${prefix}ecache99.mix`, mixData);
+        console.log(`✅ ecache99.mix: ${(mixData.byteLength / 1024).toFixed(0)} KB, ${shpFiles.length} files`);
+      }
 
-      // Step 12: Compress and download
+      // ── H: README ─────────────────────────────────────────
+      setExportProgress(88, 'Writing installation guide...');
+      zip.file(`${prefix}MOD_README.txt`, generateReadme(selectedUnits));
+
+      // ── I: Compress + download ────────────────────────────
       setExportProgress(90, 'Compressing final package...');
-      const finalBlob = await zip.generateAsync({ 
-        type: 'blob',
-        compression: 'DEFLATE',
-        compressionOptions: { level: 6 }
-      }, (metadata) => {
-        const compressionProgress = 90 + Math.floor(metadata.percent * 0.08);
-        setExportProgress(compressionProgress, 'Compressing...');
-      });
+      const finalBlob = await zip.generateAsync(
+        { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+        (meta) => setExportProgress(90 + Math.floor(meta.percent * 0.08), 'Compressing...')
+      );
 
-      setExportProgress(100, 'Download starting...');
-
-      // Trigger download with date-stamped filename
-      const timestamp = new Date().toISOString().split('T')[0];
-      saveAs(finalBlob, `TiberianSun_Mod_${timestamp}.zip`);
+      setExportProgress(99, 'Starting download...');
+      const date = new Date().toISOString().split('T')[0];
+      saveAs(finalBlob, `TiberianSun_Mod_${date}.zip`);
 
       console.log('🎉 Export complete!');
-      console.log(`📦 Package contains:`);
-      console.log(`   - rules.ini: ${(finalRulesText.length / 1024).toFixed(0)} KB (original + ${selectedUnits.length} custom units)`);
-      console.log(`   - art.ini: ${(finalArtText.length / 1024).toFixed(0)} KB (original + custom art)`);
-      console.log(`   - ${selectedUnits.length} .SHP files in root folder`);
-
-      // Reset after a short delay
-      setTimeout(() => {
-        resetExport();
-      }, 2000);
+      setExportProgress(100, 'Done!');
+      setTimeout(() => resetExport(), 2000);
 
     } catch (error) {
       console.error('❌ Export failed:', error);
       setExportProgress(0, `Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      
-      setTimeout(() => {
-        resetExport();
-      }, 3000);
+      setTimeout(() => resetExport(), 3000);
     }
   }, [customUnits, selectedUnitIds, setExporting, setExportProgress, resetExport]);
 
