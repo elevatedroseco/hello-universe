@@ -189,19 +189,47 @@ export class TiberianSunINIParser {
       const rules = (unit.rulesJson || {}) as Record<string, unknown>;
       const unitName = unit.internalName.toUpperCase();
 
-      // Create unit section with all properties
+      // Determine owner string - both factions can build by default, or use rulesJson override
+      const ownerString = String(rules.Owner || 'GDI,Nod');
+
+      // Determine prerequisite based on category and faction
+      let prerequisite: string;
+      if (rules.Prerequisite) {
+        prerequisite = String(rules.Prerequisite);
+      } else if (unit.category === 'Infantry') {
+        prerequisite = unit.faction === 'GDI' ? 'GABARR' : 'NAHAND';
+      } else if (unit.category === 'Vehicle') {
+        prerequisite = unit.faction === 'GDI' ? 'GAWEAP' : 'NAWEAP';
+      } else {
+        prerequisite = unit.faction === 'GDI' ? 'GAAIRC' : 'NAAIRCR';
+      }
+
+      // Determine primary weapon - default to M1Carbine for infantry, 120mm for vehicles
+      const defaultWeapon = unit.category === 'Infantry' ? 'M1Carbine' 
+        : unit.category === 'Vehicle' ? '120mm' 
+        : 'Maverick';
+      const primaryWeapon = String(rules.Primary || defaultWeapon);
+
+      // Create unit section with ALL required properties
       modified[unitName] = {
         Name: unit.displayName,
-        Cost: unit.cost.toString(),
-        Strength: (rules.Strength || unit.strength).toString(),
-        Armor: (rules.Armor || 'none').toString(),
-        TechLevel: unit.techLevel.toString(),
-        Speed: (rules.Speed || unit.speed).toString(),
+        TechLevel: (rules.TechLevel || unit.techLevel).toString(),
+        Owner: ownerString,
+        Prerequisite: prerequisite,
+        Primary: primaryWeapon,
+        Strength: (rules.Strength || unit.strength || 200).toString(),
+        Armor: (rules.Armor || (unit.category === 'Infantry' ? 'light' : 'heavy')).toString(),
         Sight: (rules.Sight || 5).toString(),
-        Owner: unit.faction,
+        Speed: (rules.Speed || unit.speed || 5).toString(),
+        Cost: unit.cost.toString(),
+        Points: (rules.Points || Math.floor(unit.cost / 20) || 5).toString(),
         Image: unitName,
-        Points: Math.floor(unit.cost / 100).toString()
       };
+
+      // Add secondary weapon if specified
+      if (rules.Secondary) {
+        modified[unitName].Secondary = String(rules.Secondary);
+      }
 
       // Category-specific attributes
       if (unit.category === 'Infantry') {
@@ -210,18 +238,12 @@ export class TiberianSunINIParser {
           Pip: 'white',
           Crushable: String(rules.Crushable ?? 'yes'),
           CrushSound: 'InfantrySquish',
-          Prerequisite: String(rules.Prerequisite || (unit.faction === 'GDI' ? 'GAWEAP' : 'NAHAND')),
+          Locomotor: '{4A582741-9839-11d1-B709-00A024DDAFD1}',
           VoiceSelect: '15-I000,15-I004',
           VoiceMove: '15-I006,15-I010',
           VoiceAttack: '15-I020,15-I022'
         });
 
-        if (rules.Primary) {
-          modified[unitName].Primary = String(rules.Primary);
-        }
-        if (rules.Secondary) {
-          modified[unitName].Secondary = String(rules.Secondary);
-        }
         if (rules.Elite) {
           modified[unitName].Elite = String(rules.Elite);
         }
@@ -229,17 +251,11 @@ export class TiberianSunINIParser {
       } else if (unit.category === 'Vehicle') {
         Object.assign(modified[unitName], {
           Category: 'AFV',
-          Prerequisite: String(rules.Prerequisite || (unit.faction === 'GDI' ? 'GAWEAP' : 'NAWEAP')),
           Crushable: String(rules.Crushable ?? 'no'),
-          Crusher: String(rules.Crusher ?? 'yes')
+          Crusher: String(rules.Crusher ?? 'yes'),
+          Locomotor: '{4A582742-9839-11d1-B709-00A024DDAFD1}',
         });
 
-        if (rules.Primary) {
-          modified[unitName].Primary = String(rules.Primary);
-        }
-        if (rules.Secondary) {
-          modified[unitName].Secondary = String(rules.Secondary);
-        }
         if (rules.Turret !== false) {
           modified[unitName].Turret = 'yes';
         }
@@ -247,19 +263,12 @@ export class TiberianSunINIParser {
       } else if (unit.category === 'Aircraft') {
         Object.assign(modified[unitName], {
           Category: 'AirPower',
-          Prerequisite: String(rules.Prerequisite || (unit.faction === 'GDI' ? 'GAAIRC' : 'NAAIRCR')),
-          Landable: 'yes'
+          Landable: 'yes',
+          Locomotor: '{4A582744-9839-11d1-B709-00A024DDAFD1}',
         });
-
-        if (rules.Primary) {
-          modified[unitName].Primary = String(rules.Primary);
-        }
-        if (rules.Secondary) {
-          modified[unitName].Secondary = String(rules.Secondary);
-        }
       }
 
-      // Locomotor (movement type) - map all possible names to GUIDs
+      // Override locomotor if explicitly set in rulesJson
       if (rules.Locomotor) {
         const locomotors: Record<string, string> = {
           'Foot': '{4A582741-9839-11d1-B709-00A024DDAFD1}',
@@ -297,13 +306,16 @@ export class TiberianSunINIParser {
       const unitName = unit.internalName.toUpperCase();
       const iconName = (unitName + 'ICON').substring(0, 8).toUpperCase();
 
+      // Image MUST match the SHP filename (without extension), always uppercase
       modified[unitName] = {
+        Image: unitName,
         Cameo: (art.Cameo || iconName).toString()
       };
 
       if (unit.category === 'Infantry') {
         Object.assign(modified[unitName], {
           Sequence: (art.Sequence || 'InfantrySequence').toString(),
+          ActiveAnim: 'Idle',
           Crawler: 'no',
           Remapable: 'yes'
         });
