@@ -180,10 +180,12 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       const rulesFile = rulesMatches[0];
       const artFile = artMatches[0];
       
-      // Extract the directory prefix from the rules.ini path (e.g. "ts_base_skeleton/")
+      // Extract the directory prefix from the rules.ini path (e.g. "ts_base_skeleton/INI/")
       const rulesPath = rulesFile.name;
-      const prefix = rulesPath.substring(0, rulesPath.lastIndexOf('/') + 1);
-      console.log(`📁 Detected ZIP prefix: "${prefix || '(root)'}"`);
+      const iniPrefix = rulesPath.substring(0, rulesPath.lastIndexOf('/') + 1);
+      // SHP files go in the game root folder, not the INI subfolder
+      const rootPrefix = iniPrefix.replace(/INI\/$/i, '');
+      console.log(`📁 INI prefix: "${iniPrefix}", root prefix: "${rootPrefix || '(root)'}"`);
 
       // Step 4: Extract and parse original INI files
       setExportProgress(35, 'Reading original rules.ini...');
@@ -227,9 +229,9 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
 
       // Step 10: Replace INI files in ZIP (using detected prefix)
       setExportProgress(65, 'Updating game files...');
-      zip.file(`${prefix}rules.ini`, finalRulesText);
-      zip.file(`${prefix}art.ini`, finalArtText);
-      console.log(`✅ Replaced ${prefix}rules.ini and ${prefix}art.ini with modded versions`);
+      zip.file(`${iniPrefix}rules.ini`, finalRulesText);
+      zip.file(`${iniPrefix}art.ini`, finalArtText);
+      console.log(`✅ Replaced ${iniPrefix}rules.ini and ${iniPrefix}art.ini with modded versions`);
 
       // Step 10: Download and add .SHP files to root
       setExportProgress(68, 'Downloading unit graphics...');
@@ -251,15 +253,25 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
               .replace(/^user_assets\//, '')
               .replace(/^asset-previews\//, '');
             
-            const { data, error } = await supabase.storage
+            let { data, error } = await supabase.storage
               .from(bucketName)
               .download(cleanPath);
+
+            // Fallback: if download fails and path doesn't start with units/, try with units/ prefix
+            if (error && !cleanPath.startsWith('units/')) {
+              console.log(`🔄 Retrying SHP download with units/ prefix: units/${cleanPath}`);
+              const retry = await supabase.storage
+                .from(bucketName)
+                .download(`units/${cleanPath}`);
+              data = retry.data;
+              error = retry.error;
+            }
 
             if (!error && data) {
               // CRITICAL: 8.3 filename format (max 8 chars before extension)
               const shpName = unit.internalName.substring(0, 8).toUpperCase();
-              zip.file(`${prefix}${shpName}.SHP`, data);
-              console.log(`✅ Added ${prefix}${shpName}.SHP`);
+              zip.file(`${rootPrefix}${shpName}.SHP`, data);
+              console.log(`✅ Added ${rootPrefix}${shpName}.SHP`);
             } else {
               console.warn(`⚠️ Could not download SHP for ${unit.internalName}:`, error);
             }
@@ -272,8 +284,8 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       // Step 11: Generate installation guide
       setExportProgress(88, 'Creating installation guide...');
       const readme = generateInstallationGuide(selectedUnits);
-      zip.file(`${prefix}MOD_INSTALL.txt`, readme);
-      console.log(`✅ Created ${prefix}MOD_INSTALL.txt`);
+      zip.file(`${rootPrefix}MOD_INSTALL.txt`, readme);
+      console.log(`✅ Created ${rootPrefix}MOD_INSTALL.txt`);
 
       // Step 12: Compress and download
       setExportProgress(90, 'Compressing final package...');
