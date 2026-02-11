@@ -14,6 +14,7 @@ import { TabVoice } from '@/components/admin/tabs/TabVoice';
 import { INIPreview } from '@/components/admin/INIPreview';
 import { UnitForm, DEFAULT_FORM } from '@/components/admin/types';
 import { TS_LOCOMOTORS } from '@/data/tsWeapons';
+import { ORIGINAL_GAME_UNITS } from '@/data/gameUnits';
 
 const AdminForge = () => {
   const [form, setForm] = useState<UnitForm>({ ...DEFAULT_FORM });
@@ -119,6 +120,18 @@ const AdminForge = () => {
       toast.error('Internal Name and Display Name are required');
       return;
     }
+
+    // FIX 3: Warn if internal name collides with a base game unit
+    if (ORIGINAL_GAME_UNITS.has(form.internalName.toUpperCase())) {
+      const confirmed = window.confirm(
+        `"${form.internalName}" is an original Tiberian Sun unit.\n\n` +
+        `Minting this will overwrite the base game unit during export.\n\n` +
+        `Recommended: use a unique name like "${form.internalName}X" or "${form.internalName}2".\n\n` +
+        `Continue anyway?`
+      );
+      if (!confirmed) return;
+    }
+
     mintMutation.mutate(form);
   };
 
