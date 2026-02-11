@@ -69,7 +69,10 @@ export class TiberianSunINIParser {
   }
 
   /**
-   * Convert parsed INI back to text format
+   * Convert parsed INI back to text format.
+   * 
+   * FIX 1: TypesList sections are sorted numerically, deduplicated, and re-indexed with no gaps.
+   * Existing sections preserve rawLines; only new sections and new keys are appended.
    */
   static stringify(parseResult: ParseResult): string {
     const { data, sectionOrder, rawLines } = parseResult;
@@ -96,15 +99,12 @@ export class TiberianSunINIParser {
       }
     }
 
-    // Also append modifications to existing sections (new entries in type lists)
-    // We need to find type list sections and append new indices
+    // Handle modifications to existing sections (new entries in type lists)
     for (const sectionName of sectionOrder) {
       const section = data[sectionName];
       if (!section) continue;
       
-      // Check if this section has new numeric keys added by injectUnits
-      // by comparing against what was originally parsed
-      // For simplicity, we re-scan rawLines to find existing keys
+      // Collect existing keys from rawLines for this section
       const existingKeys = new Set<string>();
       let inSection = false;
       for (const line of rawLines) {
@@ -120,28 +120,70 @@ export class TiberianSunINIParser {
         }
       }
       
-      // Find new keys that weren't in the original
-      const newEntries: string[] = [];
-      for (const [key, value] of Object.entries(section)) {
-        if (!existingKeys.has(key)) {
-          newEntries.push(`${key}=${value}`);
-        }
-      }
+      // Check if this is a TypesList (all data keys are numeric)
+      const allEntries = Object.entries(section);
+      const isTypesList = allEntries.length > 0 && allEntries.every(([k]) => !isNaN(Number(k)));
       
-      if (newEntries.length > 0) {
-        // Find the section in output and append new entries at the end of it
+      if (isTypesList) {
+        // FIX 1: Deduplicate values, sort numerically, re-index with no gaps
+        const valueSet = new Set<string>();
+        const dedupedValues: string[] = [];
+        
+        // Sort by numeric key first
+        const sorted = [...allEntries].sort(([a], [b]) => Number(a) - Number(b));
+        for (const [, v] of sorted) {
+          const val = String(v).trim();
+          if (!valueSet.has(val)) {
+            valueSet.add(val);
+            dedupedValues.push(val);
+          }
+        }
+        
+        // Build the replacement block with re-indexed keys
+        let listBlock = '';
+        dedupedValues.forEach((val, i) => {
+          listBlock += `${i}=${val}\n`;
+        });
+        
+        // Replace the entire section content in output
         const sectionHeader = `[${sectionName}]`;
         const sectionIdx = output.indexOf(sectionHeader);
         if (sectionIdx !== -1) {
-          // Find next section or end of file
           const afterHeader = sectionIdx + sectionHeader.length;
+          // Find next section or end of file
           const nextSectionMatch = output.substring(afterHeader).search(/^\[/m);
-          const insertPos = nextSectionMatch !== -1 
+          const sectionEnd = nextSectionMatch !== -1 
             ? afterHeader + nextSectionMatch 
             : output.length;
           
-          const insertion = newEntries.join('\n') + '\n';
-          output = output.substring(0, insertPos) + insertion + output.substring(insertPos);
+          // Replace everything between [SectionName]\n and next section with our clean list
+          const lineBreakAfterHeader = output.indexOf('\n', afterHeader);
+          const contentStart = lineBreakAfterHeader !== -1 ? lineBreakAfterHeader + 1 : afterHeader;
+          
+          output = output.substring(0, contentStart) + listBlock + '\n' + output.substring(sectionEnd);
+        }
+      } else {
+        // Normal section — only append NEW keys
+        const newEntries: string[] = [];
+        for (const [key, value] of Object.entries(section)) {
+          if (!existingKeys.has(key)) {
+            newEntries.push(`${key}=${value}`);
+          }
+        }
+        
+        if (newEntries.length > 0) {
+          const sectionHeader = `[${sectionName}]`;
+          const sectionIdx = output.indexOf(sectionHeader);
+          if (sectionIdx !== -1) {
+            const afterHeader = sectionIdx + sectionHeader.length;
+            const nextSectionMatch = output.substring(afterHeader).search(/^\[/m);
+            const insertPos = nextSectionMatch !== -1 
+              ? afterHeader + nextSectionMatch 
+              : output.length;
+            
+            const insertion = newEntries.join('\n') + '\n';
+            output = output.substring(0, insertPos) + insertion + output.substring(insertPos);
+          }
         }
       }
     }
@@ -161,7 +203,8 @@ export class TiberianSunINIParser {
   }
 
   /**
-   * Inject custom units into appropriate type lists
+   * Inject custom units into appropriate type lists.
+   * FIX 4: Skips units already present in the list.
    */
   static injectUnits(
     parseResult: ParseResult,
@@ -198,13 +241,27 @@ export class TiberianSunINIParser {
         sectionOrder.push(listName);
       }
 
+      // FIX 4: Get existing values to skip duplicates
+      const existingValues = new Set(
+        Object.entries(modified[listName])
+          .filter(([k]) => !isNaN(Number(k)))
+          .map(([, v]) => String(v).trim().toUpperCase())
+      );
+
       // Get next available index
       let nextIndex = this.getNextIndex(modified[listName]);
 
-      // Add each unit to the list
+      // Add each unit to the list (skip if already present)
       for (const unit of categoryUnits) {
         const unitName = unit.internalName.toUpperCase();
+        
+        if (existingValues.has(unitName)) {
+          console.log(`⏭️ Skipping ${unitName} — already in ${listName}`);
+          continue;
+        }
+
         modified[listName][nextIndex.toString()] = unitName;
+        existingValues.add(unitName);
         nextIndex++;
         console.log(`✅ Added ${unitName} to ${listName} at index ${nextIndex - 1}`);
       }
@@ -330,7 +387,9 @@ export class TiberianSunINIParser {
   }
 
   /**
-   * Add art definition sections
+   * Add art definition sections.
+   * FIX 5: Always includes Cameo= line.
+   * FIX 6: Skips units that already have an art block in the base art.ini.
    */
   static addArtDefinitions(
     parseResult: ParseResult,
@@ -344,34 +403,35 @@ export class TiberianSunINIParser {
       const unitName = unit.internalName.toUpperCase();
       const iconName = (unitName.substring(0, 4) + 'ICON').toUpperCase();
 
-      // Image MUST match the SHP filename (without extension), always uppercase
-      modified[unitName] = {
-        Image: unitName,
-      };
-
-      // Only add Cameo if unit has an icon file
-      if (unit.icon_file_path) {
-        modified[unitName].Cameo = iconName;
-      } else if (art.Cameo) {
-        modified[unitName].Cameo = String(art.Cameo);
+      // FIX 6: Skip if this section already exists in the base art.ini
+      // (prevents overwriting base game animation data like JUMPJET, E1, etc.)
+      if (sectionOrder.includes(unitName)) {
+        console.log(`⏭️ Skipping art for ${unitName} — already defined in base art.ini`);
+        continue;
       }
 
+      // Build the art block
+      const artBlock: INISection = {
+        Image: unitName,
+        Cameo: String(art.Cameo || iconName),  // FIX 5: Always include Cameo
+      };
+
       if (unit.category === 'Infantry') {
-        Object.assign(modified[unitName], {
+        Object.assign(artBlock, {
           Sequence: (art.Sequence || 'InfantrySequence').toString(),
           ActiveAnim: 'Idle',
           Crawler: 'no',
           Remapable: 'yes'
         });
       } else if (unit.category === 'Vehicle') {
-        Object.assign(modified[unitName], {
+        Object.assign(artBlock, {
           Voxel: 'no',
           Shadow: 'yes',
           Remapable: 'yes',
           Normalized: 'yes'
         });
       } else if (unit.category === 'Aircraft') {
-        Object.assign(modified[unitName], {
+        Object.assign(artBlock, {
           Voxel: 'no',
           Shadow: 'yes',
           Rotors: 'yes',
@@ -379,7 +439,8 @@ export class TiberianSunINIParser {
         });
       }
 
-      modified[unitName].SecondaryFireOffset = '0,0,0';
+      artBlock.SecondaryFireOffset = '0,0,0';
+      modified[unitName] = artBlock;
 
       console.log(`✅ Added art definition: [${unitName}]`);
     }
