@@ -3,7 +3,6 @@ import { FactionTabs } from '@/components/FactionTabs';
 import { CategoryTabs } from '@/components/CategoryTabs';
 import { UnitGrid } from '@/components/UnitGrid';
 import { ExportSection } from '@/components/ExportSection';
-import { FloatingActionButton } from '@/components/FloatingActionButton';
 import { UnitEditorDrawer } from '@/components/UnitEditorDrawer';
 import { useCustomUnits } from '@/hooks/useCustomUnits';
 import { Toaster } from '@/components/ui/sonner';
@@ -15,7 +14,7 @@ const Index = () => {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <Header />
-      
+
       <main className="flex-1 container mx-auto px-4 py-6">
         {error && (
           <div className="mb-6">
@@ -23,7 +22,7 @@ const Index = () => {
               <AlertTitle>Custom units unavailable</AlertTitle>
               <AlertDescription>
                 <p className="mb-2">
-                  The app can’t connect to your backend because the frontend is missing environment variables.
+                  The app can't connect to your backend because the frontend is missing environment variables.
                 </p>
                 <p className="font-mono text-xs break-all">
                   {error instanceof Error ? error.message : String(error)}
@@ -38,17 +37,16 @@ const Index = () => {
         )}
 
         {/* Controls Row */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
           <FactionTabs />
           <CategoryTabs />
         </div>
 
-        {/* Unit Grid */}
+        {/* Unit Grid (includes FilterBar + Tabs) */}
         <UnitGrid customUnits={customUnits} isConfigMissing={isConfigMissing} />
       </main>
 
       <ExportSection customUnits={customUnits} />
-      <FloatingActionButton />
       <UnitEditorDrawer onUnitCreated={addUnit} isCreating={isCreating} />
       <Toaster />
     </div>

@@ -4,8 +4,9 @@ import { supabase, isSupabaseConfigured, requireSupabase } from '@/integrations/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Settings2, Swords, Gauge, ImageIcon, Volume2, Sparkles, ArrowLeft, PenLine, X } from 'lucide-react';
+import { Settings2, Swords, Gauge, ImageIcon, Volume2, Sparkles, ArrowLeft, PenLine, Search, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { TabGeneral } from '@/components/admin/tabs/TabGeneral';
 import { TabCombat } from '@/components/admin/tabs/TabCombat';
@@ -16,7 +17,7 @@ import { INIPreview } from '@/components/admin/INIPreview';
 import { UnitForm, DEFAULT_FORM } from '@/components/admin/types';
 import { TS_LOCOMOTORS } from '@/data/tsWeapons';
 import { ORIGINAL_GAME_UNITS } from '@/data/gameUnits';
-import { renameUnit } from '@/lib/renameUnit';
+import { RenameUnitDialog } from '@/components/admin/RenameUnitDialog';
 
 interface ForgeUnit {
   id: string;
@@ -29,14 +30,9 @@ interface ForgeUnit {
 const AdminForge = () => {
   const [form, setForm] = useState<UnitForm>({ ...DEFAULT_FORM });
   const queryClient = useQueryClient();
-
-  // Rename state
   const [renamingUnit, setRenamingUnit] = useState<ForgeUnit | null>(null);
-  const [newNameInput, setNewNameInput] = useState('');
-  const [renameProgress, setRenameProgress] = useState<string | null>(null);
-  const [isRenaming, setIsRenaming] = useState(false);
+  const [listSearch, setListSearch] = useState('');
 
-  // Fetch existing custom units for the list
   const { data: forgeUnits = [] } = useQuery({
     queryKey: ['forge-units'],
     queryFn: async () => {
@@ -51,14 +47,18 @@ const AdminForge = () => {
     enabled: isSupabaseConfigured,
   });
 
+  const filteredForgeUnits = forgeUnits.filter((u) => {
+    if (!listSearch) return true;
+    const q = listSearch.toLowerCase();
+    return u.internal_name.toLowerCase().includes(q) || u.name.toLowerCase().includes(q);
+  });
+
   const mintMutation = useMutation({
     mutationFn: async (formData: UnitForm) => {
       const client = requireSupabase();
-
       let shpFilePath: string | null = null;
       let iconFilePath: string | null = null;
 
-      // Upload sprite SHP
       if (formData.spriteFile) {
         const fileName = `${formData.internalName.toLowerCase()}_${Date.now()}.shp`;
         const filePath = `units/${fileName}`;
@@ -67,7 +67,6 @@ const AdminForge = () => {
         shpFilePath = filePath;
       }
 
-      // Upload icon SHP
       if (formData.iconFile) {
         const iconName = `${formData.internalName.toLowerCase()}_icon_${Date.now()}.shp`;
         const iconPath = `units/${iconName}`;
@@ -152,7 +151,6 @@ const AdminForge = () => {
       toast.error('Internal Name and Display Name are required');
       return;
     }
-
     if (ORIGINAL_GAME_UNITS.has(form.internalName.toUpperCase())) {
       const confirmed = window.confirm(
         `"${form.internalName}" is an original Tiberian Sun unit.\n\n` +
@@ -162,49 +160,18 @@ const AdminForge = () => {
       );
       if (!confirmed) return;
     }
-
     mintMutation.mutate(form);
   };
 
-  const handleRename = async () => {
-    if (!renamingUnit || !newNameInput || newNameInput === renamingUnit.internal_name) return;
-    setIsRenaming(true);
-    try {
-      await renameUnit(
-        renamingUnit.id,
-        renamingUnit.internal_name,
-        newNameInput,
-        setRenameProgress
-      );
-      toast.success(`Renamed to ${newNameInput}`);
-      queryClient.invalidateQueries({ queryKey: ['forge-units'] });
-      queryClient.invalidateQueries({ queryKey: ['custom-units'] });
-      setRenamingUnit(null);
-      setNewNameInput('');
-      setRenameProgress(null);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Rename failed');
-    } finally {
-      setIsRenaming(false);
-    }
-  };
-
-  const openRenameDialog = (unit: ForgeUnit) => {
-    setRenamingUnit(unit);
-    setNewNameInput(unit.internal_name);
-    setRenameProgress(null);
-  };
-
-  const closeRenameDialog = () => {
-    setRenamingUnit(null);
-    setNewNameInput('');
-    setRenameProgress(null);
-  };
+  // Validation hints
+  const nameEmpty = !form.internalName;
+  const nameTooLong = form.internalName.length > 8;
+  const nameCollision = form.internalName ? ORIGINAL_GAME_UNITS.has(form.internalName.toUpperCase()) : false;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="border-b border-border px-4 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-40 border-b border-border bg-card/80 backdrop-blur-md px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link to="/" className="text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-5 h-5" />
@@ -219,147 +186,125 @@ const AdminForge = () => {
         )}
       </header>
 
-      <div className="max-w-3xl mx-auto p-4 space-y-6">
-        {/* Existing Units List */}
-        {forgeUnits.length > 0 && (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-border">
-              <h2 className="font-display text-sm text-muted-foreground">MINTED UNITS ({forgeUnits.length})</h2>
-            </div>
+      {/* Split Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] min-h-[calc(100vh-57px)]">
+        {/* Left: Minted units list */}
+        <aside className="border-b lg:border-b-0 lg:border-r border-border bg-card/30 overflow-y-auto max-h-[300px] lg:max-h-[calc(100vh-57px)]">
+          <div className="p-3 border-b border-border sticky top-0 bg-card/80 backdrop-blur-sm z-10 space-y-2">
+            <h2 className="font-display text-xs text-muted-foreground">
+              MINTED UNITS ({forgeUnits.length})
+            </h2>
+            {forgeUnits.length > 3 && (
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  value={listSearch}
+                  onChange={(e) => setListSearch(e.target.value)}
+                  placeholder="Search..."
+                  className="pl-8 h-8 text-xs bg-card/50"
+                />
+              </div>
+            )}
+          </div>
+          {filteredForgeUnits.length > 0 ? (
             <div className="divide-y divide-border">
-              {forgeUnits.map((unit) => (
-                <div key={unit.id} className="flex items-center justify-between px-4 py-2.5 group hover:bg-secondary/50 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-sm text-foreground">{unit.internal_name}</span>
-                    <span className="text-xs text-muted-foreground">{unit.name}</span>
-                    <span className="text-xs text-muted-foreground/60">{unit.faction} · {unit.category}</span>
+              {filteredForgeUnits.map((unit) => (
+                <div key={unit.id} className="flex items-center justify-between px-3 py-2.5 group hover:bg-secondary/50 transition-colors">
+                  <div className="min-w-0 flex-1">
+                    <span className="font-mono text-sm text-foreground block truncate">{unit.internal_name}</span>
+                    <span className="text-xs text-muted-foreground truncate block">{unit.name} · {unit.faction}</span>
                   </div>
                   <button
-                    onClick={() => openRenameDialog(unit)}
-                    className="p-1.5 rounded bg-primary/10 hover:bg-primary/30 text-primary opacity-0 group-hover:opacity-100 transition-all"
+                    onClick={() => setRenamingUnit(unit)}
+                    className="p-1.5 rounded bg-primary/10 hover:bg-primary/30 text-primary opacity-0 group-hover:opacity-100 transition-all shrink-0 ml-2"
                     title="Rename unit"
+                    aria-label={`Rename ${unit.internal_name}`}
                   >
                     <PenLine className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="p-6 text-center text-xs text-muted-foreground">
+              {forgeUnits.length === 0 ? 'No minted units yet' : 'No matches'}
+            </div>
+          )}
+        </aside>
 
-        {/* Unit Creator Form */}
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          {/* Tabs */}
-          <Tabs defaultValue="general">
-            <TabsList className="w-full grid grid-cols-5 bg-secondary rounded-none border-b border-border">
-              <TabsTrigger value="general" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                <Settings2 className="w-3 h-3 mr-1" />
-                General
-              </TabsTrigger>
-              <TabsTrigger value="combat" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                <Swords className="w-3 h-3 mr-1" />
-                Combat
-              </TabsTrigger>
-              <TabsTrigger value="physics" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                <Gauge className="w-3 h-3 mr-1" />
-                Physics
-              </TabsTrigger>
-              <TabsTrigger value="art" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                <ImageIcon className="w-3 h-3 mr-1" />
-                Art
-              </TabsTrigger>
-              <TabsTrigger value="voice" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                <Volume2 className="w-3 h-3 mr-1" />
-                Voice
-              </TabsTrigger>
-            </TabsList>
+        {/* Right: Editor */}
+        <div className="overflow-y-auto">
+          <div className="max-w-3xl mx-auto p-4 space-y-6">
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <Tabs defaultValue="general">
+                <TabsList className="w-full grid grid-cols-5 bg-secondary rounded-none border-b border-border">
+                  <TabsTrigger value="general" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                    <Settings2 className="w-3 h-3 mr-1" /> General
+                  </TabsTrigger>
+                  <TabsTrigger value="combat" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                    <Swords className="w-3 h-3 mr-1" /> Combat
+                  </TabsTrigger>
+                  <TabsTrigger value="physics" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                    <Gauge className="w-3 h-3 mr-1" /> Physics
+                  </TabsTrigger>
+                  <TabsTrigger value="art" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                    <ImageIcon className="w-3 h-3 mr-1" /> Art
+                  </TabsTrigger>
+                  <TabsTrigger value="voice" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                    <Volume2 className="w-3 h-3 mr-1" /> Voice
+                  </TabsTrigger>
+                </TabsList>
 
-            <TabsContent value="general"><TabGeneral form={form} setForm={setForm} /></TabsContent>
-            <TabsContent value="combat"><TabCombat form={form} setForm={setForm} /></TabsContent>
-            <TabsContent value="physics"><TabPhysics form={form} setForm={setForm} /></TabsContent>
-            <TabsContent value="art"><TabArt form={form} setForm={setForm} /></TabsContent>
-            <TabsContent value="voice"><TabVoice form={form} setForm={setForm} /></TabsContent>
-          </Tabs>
+                <TabsContent value="general"><TabGeneral form={form} setForm={setForm} /></TabsContent>
+                <TabsContent value="combat"><TabCombat form={form} setForm={setForm} /></TabsContent>
+                <TabsContent value="physics"><TabPhysics form={form} setForm={setForm} /></TabsContent>
+                <TabsContent value="art"><TabArt form={form} setForm={setForm} /></TabsContent>
+                <TabsContent value="voice"><TabVoice form={form} setForm={setForm} /></TabsContent>
+              </Tabs>
 
-          {/* INI Preview */}
-          <INIPreview form={form} />
+              <INIPreview form={form} />
 
-          {/* Mint Button */}
-          <div className="p-4 border-t border-border">
-            <Button
-              onClick={handleMint}
-              disabled={mintMutation.isPending || !form.internalName || !form.displayName}
-              className="w-full bg-modded-gold hover:bg-modded-gold-glow text-black font-display text-sm h-12"
-            >
-              <Sparkles className="w-4 h-4 mr-2" />
-              {mintMutation.isPending ? 'MINTING...' : 'MINT UNIT'}
-            </Button>
+              {/* Validation hints + Mint */}
+              <div className="p-4 border-t border-border space-y-3">
+                {/* Hints */}
+                <div className="flex flex-wrap gap-2 empty:hidden">
+                  {nameEmpty && (
+                    <Badge variant="outline" className="text-xs text-destructive border-destructive/50 gap-1">
+                      <AlertTriangle className="w-3 h-3" /> Internal name required
+                    </Badge>
+                  )}
+                  {nameTooLong && (
+                    <Badge variant="outline" className="text-xs text-destructive border-destructive/50 gap-1">
+                      <AlertTriangle className="w-3 h-3" /> Max 8 characters
+                    </Badge>
+                  )}
+                  {nameCollision && !nameEmpty && (
+                    <Badge variant="outline" className="text-xs text-modded-gold border-modded-gold/50 gap-1">
+                      <AlertTriangle className="w-3 h-3" /> Conflicts with base game unit
+                    </Badge>
+                  )}
+                </div>
+
+                <Button
+                  onClick={handleMint}
+                  disabled={mintMutation.isPending || nameEmpty || !form.displayName}
+                  className="w-full bg-modded-gold hover:bg-modded-gold-glow text-black font-display text-sm h-12"
+                >
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  {mintMutation.isPending ? 'MINTING...' : 'MINT UNIT'}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Rename Dialog Overlay */}
-      {renamingUnit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-base text-foreground flex items-center gap-2">
-                <PenLine className="w-4 h-4 text-primary" />
-                Rename Unit
-              </h3>
-              <button onClick={closeRenameDialog} className="text-muted-foreground hover:text-foreground">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-sm text-muted-foreground">
-              Current: <span className="font-mono text-foreground">{renamingUnit.internal_name}</span>
-            </p>
-
-            <Input
-              value={newNameInput}
-              onChange={(e) =>
-                setNewNameInput(
-                  e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 8)
-                )
-              }
-              placeholder="NEW NAME (max 8 chars)"
-              className="font-mono"
-            />
-
-            {/* Live preview */}
-            <div className="bg-secondary/50 rounded-lg p-3 text-xs font-mono space-y-1">
-              <p className="text-muted-foreground font-sans font-medium mb-1">Preview:</p>
-              <p className="text-destructive">- {renamingUnit.internal_name}.SHP</p>
-              <p className="text-destructive">- {(renamingUnit.internal_name + 'ICON').substring(0, 8)}.SHP</p>
-              <p className="text-accent-foreground">+ {newNameInput || '???'}.SHP</p>
-              <p className="text-accent-foreground">+ {((newNameInput || '???') + 'ICON').substring(0, 8)}.SHP</p>
-            </div>
-
-            {renameProgress && (
-              <p className="text-xs text-muted-foreground font-mono">{renameProgress}</p>
-            )}
-
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={closeRenameDialog}
-                className="flex-1"
-                disabled={isRenaming}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleRename}
-                disabled={!newNameInput || newNameInput === renamingUnit.internal_name || isRenaming}
-                className="flex-1 bg-primary hover:bg-primary/90"
-              >
-                {isRenaming ? 'Renaming...' : 'Rename'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Rename Dialog */}
+      <RenameUnitDialog
+        unit={renamingUnit}
+        open={!!renamingUnit}
+        onOpenChange={(open) => { if (!open) setRenamingUnit(null); }}
+      />
     </div>
   );
 };
