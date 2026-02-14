@@ -308,7 +308,7 @@ export class TiberianSunINIParser {
       // Create unit section with ALL required properties
       modified[unitName] = {
         Name: unit.displayName,
-        TechLevel: (rules.TechLevel || unit.techLevel).toString(),
+        TechLevel: (rules.TechLevel || unit.techLevel || 1).toString(),
         Owner: ownerString,
         Prerequisite: prerequisite,
         Primary: primaryWeapon,
@@ -416,7 +416,7 @@ export class TiberianSunINIParser {
     for (const unit of units) {
       const art = (unit.artJson || {}) as Record<string, unknown>;
       const unitName = unit.internalName.toUpperCase();
-      const iconName = (unitName.substring(0, 4) + 'ICON').toUpperCase();
+      const iconName = unitName + 'ICON';
       const isVoxel = unit.renderType === 'VOXEL';
 
       // FIX 6: Skip if this section already exists in the base art.ini
@@ -432,9 +432,10 @@ export class TiberianSunINIParser {
           Remapable: 'yes',
           Shadow: 'yes',
           Normalized: 'yes',
-          Cameo: String(art.Cameo || iconName),
-          PrimaryFireFLH: String(art.PrimaryFireFLH || '0,0,100'),
-          SecondaryFireFLH: String(art.SecondaryFireFLH || '0,0,100'),
+        Cameo: String(art.Cameo || iconName),
+        AltCameo: String(art.AltCameo || iconName),
+        PrimaryFireFLH: String(art.PrimaryFireFLH || '0,0,100'),
+        SecondaryFireFLH: String(art.SecondaryFireFLH || '0,0,100'),
         };
 
         if (art.TurretOffset !== undefined) {
@@ -450,6 +451,7 @@ export class TiberianSunINIParser {
         const artBlock: INISection = {
           Image: unitName,
           Cameo: String(art.Cameo || iconName),
+          AltCameo: String(art.AltCameo || iconName),
         };
 
         if (unit.category === 'Infantry') {

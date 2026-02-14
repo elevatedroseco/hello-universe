@@ -208,7 +208,7 @@ describe('Export Pipeline E2E', () => {
       expect(withArt.data['TSTUNIT']).toBeDefined();
       expect(withArt.data['TSTUNIT'].Image).toBe('TSTUNIT');
       expect(withArt.data['TSTUNIT'].Sequence).toBe('InfantrySequence');
-      expect(withArt.data['TSTUNIT'].Cameo).toBe('TSTUICON');
+      expect(withArt.data['TSTUNIT'].Cameo).toBe('TSTUNITICON');
     });
 
     it('generates Voxel art block for vehicle', () => {
@@ -355,7 +355,7 @@ describe('Export Pipeline E2E', () => {
       // 7. Verify art.ini content
       const artInZip = await loaded.file('art.ini')!.async('string');
       expect(artInZip).toContain('[TSTUNIT]');
-      expect(artInZip).toContain('Cameo=TSTUICON');
+      expect(artInZip).toContain('Cameo=TSTUNITICON');
 
       // 8. Verify MIX is binary and correct size
       const mixInZip = await loaded.file('ecache99.mix')!.async('uint8array');

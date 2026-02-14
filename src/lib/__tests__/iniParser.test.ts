@@ -187,7 +187,7 @@ describe('TiberianSunINIParser.addArtDefinitions', () => {
     const result = TiberianSunINIParser.addArtDefinitions(parsed, [unit]);
     const art = result.data['TUNIT'];
     expect(art.Image).toBe('TUNIT');
-    expect(art.Cameo).toBe('TUNIICON');
+    expect(art.Cameo).toBe('TUNITICON');
     expect(art.Sequence).toBe('InfantrySequence');
   });
 
