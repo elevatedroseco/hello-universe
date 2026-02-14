@@ -5,8 +5,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Settings2, Swords, Gauge, ImageIcon, Volume2, Sparkles, ArrowLeft, PenLine, Search, AlertTriangle, Building2, ShieldCheck } from 'lucide-react';
+import { Settings2, Swords, Gauge, ImageIcon, Volume2, Sparkles, ArrowLeft, PenLine, Search, AlertTriangle, Building2, ShieldCheck, Lock, RotateCcw, Wand2, Zap } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { TabGeneral } from '@/components/admin/tabs/TabGeneral';
 import { TabCombat } from '@/components/admin/tabs/TabCombat';
@@ -21,6 +22,8 @@ import { TS_LOCOMOTORS } from '@/data/tsWeapons';
 import { ORIGINAL_GAME_UNITS } from '@/data/gameUnits';
 import { RenameUnitDialog } from '@/components/admin/RenameUnitDialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { AssetDropZone, ProcessedAssets, RecognizedFile } from '@/components/admin/AssetDropZone';
+import { IconGenerator } from '@/components/admin/IconGenerator';
 
 interface ForgeUnit {
   id: string;
@@ -36,6 +39,13 @@ const AdminForge = () => {
   const queryClient = useQueryClient();
   const [renamingUnit, setRenamingUnit] = useState<ForgeUnit | null>(null);
   const [listSearch, setListSearch] = useState('');
+
+  // Asset-first state
+  const [assetsDropped, setAssetsDropped] = useState(false);
+  const [droppedInternalId, setDroppedInternalId] = useState('');
+  const [droppedFiles, setDroppedFiles] = useState<RecognizedFile[]>([]);
+  const [autoFilledFields, setAutoFilledFields] = useState<string[]>([]);
+  const [iconImageFile, setIconImageFile] = useState<File | null>(null);
 
   const { data: forgeUnits = [], isLoading: forgeLoading } = useQuery({
     queryKey: ['forge-units'],
@@ -66,6 +76,134 @@ const AdminForge = () => {
 
   const isStructure = form.category === 'Structure';
 
+  // Handle asset drop
+  const handleFilesProcessed = (result: ProcessedAssets) => {
+    const { internalId, recognizedFiles, parsedConfig } = result;
+    const filled: string[] = [];
+
+    // Set internal ID
+    if (internalId) {
+      setDroppedInternalId(internalId);
+      setForm((prev) => ({ ...prev, internalName: internalId }));
+      filled.push('internalName');
+    }
+
+    // Detect render type
+    const hasVXL = recognizedFiles.some((f) => f.type === 'voxel');
+    const renderType = hasVXL ? 'VOXEL' : 'SHP';
+    setForm((prev) => ({ ...prev, renderType }));
+    filled.push('renderType');
+
+    // Assign files to form
+    for (const rf of recognizedFiles) {
+      if (rf.type === 'sprite') {
+        setForm((prev) => ({ ...prev, spriteFile: rf.file }));
+      } else if (rf.type === 'voxel') {
+        setForm((prev) => ({ ...prev, vxlFile: rf.file }));
+      } else if (rf.type === 'animation') {
+        setForm((prev) => ({ ...prev, hvaFile: rf.file }));
+      } else if (rf.type === 'icon') {
+        setForm((prev) => ({ ...prev, iconFile: rf.file }));
+      } else if (rf.type === 'image') {
+        setIconImageFile(rf.file);
+      } else if (rf.type === 'turret') {
+        setForm((prev) => ({ ...prev, hasTurret: true, turretVxlFile: rf.file }));
+        filled.push('hasTurret');
+      } else if (rf.type === 'barrel') {
+        setForm((prev) => ({ ...prev, hasBarrel: true, barrelVxlFile: rf.file }));
+        filled.push('hasBarrel');
+      } else if (rf.type === 'buildup') {
+        setForm((prev) => ({ ...prev, buildupFile: rf.file }));
+      }
+    }
+
+    // Auto-fill from config
+    if (parsedConfig) {
+      autoFillFromConfig(parsedConfig, filled);
+    } else {
+      applySmartDefaults(renderType, filled);
+    }
+
+    setDroppedFiles(recognizedFiles);
+    setAutoFilledFields(filled);
+    setAssetsDropped(true);
+
+    // Flash animation
+    setTimeout(() => {
+      filled.forEach((field) => {
+        const el = document.getElementById(`field-${field}`);
+        if (el) {
+          el.classList.add('animate-flash-green');
+          setTimeout(() => el.classList.remove('animate-flash-green'), 2000);
+        }
+      });
+    }, 100);
+  };
+
+  const autoFillFromConfig = (config: Record<string, string>, filled: string[]) => {
+    setForm((prev) => {
+      const updates: Partial<UnitForm> = {};
+
+      if (config.Name) { updates.displayName = config.Name; filled.push('displayName'); }
+      if (config.Owner) {
+        const owner = config.Owner.split(',')[0].trim();
+        updates.faction = (owner === 'GDI' ? 'GDI' : owner === 'Nod' ? 'Nod' : 'Mutant') as UnitForm['faction'];
+        filled.push('faction');
+      }
+      if (config.Category) {
+        const cat = config.Category.toLowerCase();
+        if (cat === 'soldier') updates.category = 'Infantry';
+        else if (cat === 'afv') updates.category = 'Vehicle';
+        else if (cat === 'airpower') updates.category = 'Aircraft';
+        else if (cat === 'support') updates.category = 'Structure';
+        filled.push('category');
+      }
+      if (config.Cost) { updates.cost = parseInt(config.Cost); filled.push('cost'); }
+      if (config.Strength) { updates.strength = parseInt(config.Strength); filled.push('strength'); }
+      if (config.Speed) { updates.speed = parseInt(config.Speed); filled.push('speed'); }
+      if (config.TechLevel) { updates.techLevel = parseInt(config.TechLevel); filled.push('techLevel'); }
+      if (config.Prerequisite) { updates.prerequisite = config.Prerequisite; filled.push('prerequisite'); }
+      if (config.Primary) { updates.primaryWeapon = config.Primary; filled.push('primaryWeapon'); }
+      if (config.Armor) { updates.armor = config.Armor; filled.push('armor'); }
+
+      return { ...prev, ...updates };
+    });
+  };
+
+  const applySmartDefaults = (renderType: 'SHP' | 'VOXEL', filled: string[]) => {
+    setForm((prev) => {
+      if (renderType === 'VOXEL') {
+        filled.push('category', 'strength', 'speed', 'armor', 'locomotor');
+        return {
+          ...prev,
+          category: 'Vehicle',
+          strength: 400,
+          speed: 6,
+          armor: 'light',
+          locomotor: 'Drive',
+          crushable: false,
+          crusher: true,
+        };
+      } else {
+        filled.push('category');
+        return { ...prev, category: 'Infantry' };
+      }
+    });
+  };
+
+  const handleStartOver = () => {
+    setAssetsDropped(false);
+    setDroppedInternalId('');
+    setDroppedFiles([]);
+    setAutoFilledFields([]);
+    setIconImageFile(null);
+    setForm({ ...DEFAULT_FORM });
+  };
+
+  const handleIconReady = (file: File) => {
+    setIconImageFile(file);
+  };
+
   const mintMutation = useMutation({
     mutationFn: async (formData: UnitForm) => {
       const client = requireSupabase();
@@ -76,16 +214,16 @@ const AdminForge = () => {
       let turretVxlPath: string | null = null;
       let barrelVxlPath: string | null = null;
       let buildupFilePath: string | null = null;
+      let previewImageUrl: string | null = null;
 
       const isVoxel = formData.renderType === 'VOXEL';
       const isStruct = formData.category === 'Structure';
 
-      // Validate voxel files
       if (isVoxel && (!formData.vxlFile || !formData.hvaFile)) {
         throw new Error('Voxel units require both VXL and HVA files');
       }
 
-      // Upload SHP sprite (for SHP render type or structures)
+      // Upload SHP
       if ((!isVoxel || isStruct) && formData.spriteFile) {
         const fileName = `${formData.internalName.toLowerCase()}_${Date.now()}.shp`;
         const filePath = `units/${fileName}`;
@@ -94,7 +232,7 @@ const AdminForge = () => {
         shpFilePath = filePath;
       }
 
-      // Upload buildup SHP for structures
+      // Upload buildup
       if (isStruct && formData.buildupFile) {
         const fileName = `${formData.internalName.toLowerCase()}_buildup_${Date.now()}.shp`;
         const filePath = `units/${fileName}`;
@@ -103,7 +241,7 @@ const AdminForge = () => {
         buildupFilePath = filePath;
       }
 
-      // Upload VXL file
+      // Upload VXL
       if (isVoxel && formData.vxlFile) {
         const filePath = `units/${formData.internalName.toUpperCase()}.VXL`;
         const { error } = await client.storage.from('user_assets').upload(filePath, formData.vxlFile, { upsert: true });
@@ -111,7 +249,7 @@ const AdminForge = () => {
         vxlFilePath = filePath;
       }
 
-      // Upload HVA file
+      // Upload HVA
       if (isVoxel && formData.hvaFile) {
         const filePath = `units/${formData.internalName.toUpperCase()}.HVA`;
         const { error } = await client.storage.from('user_assets').upload(filePath, formData.hvaFile, { upsert: true });
@@ -135,13 +273,24 @@ const AdminForge = () => {
         barrelVxlPath = filePath;
       }
 
-      // Upload icon/cameo (always SHP)
+      // Upload icon SHP
       if (formData.iconFile) {
         const iconName = `${formData.internalName.toLowerCase()}_icon_${Date.now()}.shp`;
         const iconPath = `units/${iconName}`;
         const { error } = await client.storage.from('user_assets').upload(iconPath, formData.iconFile, { upsert: true });
         if (error) throw error;
         iconFilePath = iconPath;
+      }
+
+      // Upload preview image (from icon generator)
+      if (iconImageFile) {
+        const ext = iconImageFile.name.split('.').pop() || 'png';
+        const imgName = `${formData.internalName.toLowerCase()}_preview_${Date.now()}.${ext}`;
+        const imgPath = `previews/${imgName}`;
+        const { error } = await client.storage.from('user_assets').upload(imgPath, iconImageFile, { upsert: true });
+        if (error) throw error;
+        const { data: urlData } = client.storage.from('user_assets').getPublicUrl(imgPath);
+        previewImageUrl = urlData.publicUrl;
       }
 
       const locoGuid = TS_LOCOMOTORS.find((l) => l.id === formData.locomotor)?.guid || '';
@@ -176,7 +325,6 @@ const AdminForge = () => {
         Points: formData.points,
       };
 
-      // Structure-specific rules
       if (isStruct) {
         rulesJson.Power = formData.power;
         rulesJson.PowerDrain = formData.powerDrain;
@@ -187,7 +335,6 @@ const AdminForge = () => {
         rulesJson.IsBase = true;
       }
 
-      // Voxel-specific rules
       if (isVoxel && formData.hasTurret) {
         rulesJson.Turret = true;
       }
@@ -244,6 +391,7 @@ const AdminForge = () => {
         build_cat: isStruct ? formData.buildCat : null,
         is_factory: isStruct ? formData.isFactory : false,
         has_bib: isStruct ? formData.hasBib : false,
+        preview_image_url: previewImageUrl,
       };
 
       const { data, error } = await client
@@ -259,7 +407,7 @@ const AdminForge = () => {
       queryClient.invalidateQueries({ queryKey: ['custom-units'] });
       queryClient.invalidateQueries({ queryKey: ['forge-units'] });
       toast.success(`Unit "${form.displayName}" minted!`);
-      setForm({ ...DEFAULT_FORM });
+      handleStartOver();
     },
     onError: (err) => {
       toast.error(`Mint failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -289,6 +437,8 @@ const AdminForge = () => {
 
   const handleClone = (clonedFields: Partial<UnitForm>) => {
     setForm((prev) => ({ ...prev, ...clonedFields }));
+    setAssetsDropped(true);
+    setDroppedInternalId(clonedFields.internalName || '');
     toast.info('Unit cloned! Modify as needed, then mint.');
   };
 
@@ -296,10 +446,7 @@ const AdminForge = () => {
   const nameEmpty = !form.internalName;
   const nameTooLong = form.internalName.length > 8;
   const nameCollision = form.internalName ? ORIGINAL_GAME_UNITS.has(form.internalName.toUpperCase()) : false;
-
-  // Determine which tabs to show
   const showStructureTab = isStructure;
-  const showCombatPhysicsArtVoice = !isStructure;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -313,6 +460,11 @@ const AdminForge = () => {
             <Sparkles className="w-5 h-5 text-modded-gold" />
             UNIT FORGE
           </h1>
+          {assetsDropped && (
+            <Badge className="bg-mutant-green/20 text-mutant-green border-mutant-green/30 font-mono text-xs">
+              ASSET-FIRST MODE
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <CloneUnitDialog onClone={handleClone} />
@@ -390,90 +542,219 @@ const AdminForge = () => {
         {/* Right: Editor */}
         <div className="overflow-y-auto">
           <div className="max-w-3xl mx-auto p-4 space-y-6">
-            <div className="bg-card border border-border rounded-xl overflow-hidden">
-              {showStructureTab ? (
-                /* Structure-specific tabs */
-                <Tabs defaultValue="general">
-                  <TabsList className="w-full grid grid-cols-3 bg-secondary rounded-none border-b border-border">
-                    <TabsTrigger value="general" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                      <Settings2 className="w-3 h-3 mr-1" /> General
-                    </TabsTrigger>
-                    <TabsTrigger value="structure" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                      <Building2 className="w-3 h-3 mr-1" /> Structure
-                    </TabsTrigger>
-                    <TabsTrigger value="combat" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                      <Swords className="w-3 h-3 mr-1" /> Combat
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="general"><TabGeneral form={form} setForm={setForm} /></TabsContent>
-                  <TabsContent value="structure"><TabStructure form={form} setForm={setForm} /></TabsContent>
-                  <TabsContent value="combat"><TabCombat form={form} setForm={setForm} /></TabsContent>
-                </Tabs>
-              ) : (
-                /* Unit tabs (Infantry/Vehicle/Aircraft) */
-                <Tabs defaultValue="general">
-                  <TabsList className="w-full grid grid-cols-5 bg-secondary rounded-none border-b border-border">
-                    <TabsTrigger value="general" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                      <Settings2 className="w-3 h-3 mr-1" /> General
-                    </TabsTrigger>
-                    <TabsTrigger value="combat" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                      <Swords className="w-3 h-3 mr-1" /> Combat
-                    </TabsTrigger>
-                    <TabsTrigger value="physics" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                      <Gauge className="w-3 h-3 mr-1" /> Physics
-                    </TabsTrigger>
-                    <TabsTrigger value="art" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                      <ImageIcon className="w-3 h-3 mr-1" /> Art
-                    </TabsTrigger>
-                    <TabsTrigger value="voice" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
-                      <Volume2 className="w-3 h-3 mr-1" /> Voice
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="general"><TabGeneral form={form} setForm={setForm} /></TabsContent>
-                  <TabsContent value="combat"><TabCombat form={form} setForm={setForm} /></TabsContent>
-                  <TabsContent value="physics"><TabPhysics form={form} setForm={setForm} /></TabsContent>
-                  <TabsContent value="art"><TabArt form={form} setForm={setForm} /></TabsContent>
-                  <TabsContent value="voice"><TabVoice form={form} setForm={setForm} /></TabsContent>
-                </Tabs>
-              )}
 
-              <INIPreview form={form} />
+            {/* STATE 1: Before Assets Dropped */}
+            {!assetsDropped && (
+              <div className="space-y-6">
+                {/* Hero card */}
+                <Card className="border-border bg-gradient-to-br from-secondary to-card overflow-hidden">
+                  <CardContent className="p-8 text-center space-y-4">
+                    <div className="w-16 h-16 rounded-2xl bg-modded-gold/10 border border-modded-gold/30 flex items-center justify-center mx-auto">
+                      <Zap className="w-8 h-8 text-modded-gold" />
+                    </div>
+                    <h2 className="text-2xl font-display text-foreground">
+                      Asset-First Unit Creation
+                    </h2>
+                    <p className="text-muted-foreground max-w-md mx-auto">
+                      Drop your unit files to get started. Everything auto-fills from your assets!
+                    </p>
+                    <div className="flex justify-center gap-6 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-modded-gold" /> 3× faster
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-mutant-green" /> No mismatches
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <Wand2 className="w-3.5 h-3.5 text-primary" /> AI icon gen
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
 
-              {/* Validation hints + Mint */}
-              <div className="p-4 border-t border-border space-y-3">
-                <div className="flex flex-wrap gap-2 empty:hidden">
-                  {nameEmpty && (
-                    <Badge variant="outline" className="text-xs text-destructive border-destructive/50 gap-1">
-                      <AlertTriangle className="w-3 h-3" /> Internal name required
-                    </Badge>
-                  )}
-                  {nameTooLong && (
-                    <Badge variant="outline" className="text-xs text-destructive border-destructive/50 gap-1">
-                      <AlertTriangle className="w-3 h-3" /> Max 8 characters
-                    </Badge>
-                  )}
-                  {nameCollision && !nameEmpty && (
-                    <Badge variant="outline" className="text-xs text-modded-gold border-modded-gold/50 gap-1">
-                      <AlertTriangle className="w-3 h-3" /> Conflicts with base game unit
-                    </Badge>
-                  )}
-                  {form.renderType === 'VOXEL' && (!form.vxlFile || !form.hvaFile) && (
-                    <Badge variant="outline" className="text-xs text-destructive border-destructive/50 gap-1">
-                      <AlertTriangle className="w-3 h-3" /> VXL + HVA files required
-                    </Badge>
-                  )}
+                {/* Drop Zone */}
+                <AssetDropZone onFilesProcessed={handleFilesProcessed} />
+
+                {/* Or manual mode */}
+                <div className="text-center">
+                  <button
+                    onClick={() => setAssetsDropped(true)}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
+                  >
+                    Or start manually without files →
+                  </button>
                 </div>
-
-                <Button
-                  onClick={handleMint}
-                  disabled={mintMutation.isPending || nameEmpty || !form.displayName}
-                  className="w-full bg-modded-gold hover:bg-modded-gold-glow text-black font-display text-sm h-12"
-                >
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  {mintMutation.isPending ? 'MINTING...' : isStructure ? 'MINT STRUCTURE' : 'MINT UNIT'}
-                </Button>
               </div>
-            </div>
+            )}
+
+            {/* STATE 2: After Assets Dropped */}
+            {assetsDropped && (
+              <div className="space-y-4">
+                {/* Locked ID Header */}
+                {droppedInternalId && (
+                  <Card className="border-mutant-green/30 bg-mutant-green/5">
+                    <CardContent className="p-3 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Lock className="w-4 h-4 text-mutant-green" />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">Internal ID:</span>
+                            <code className="text-base font-bold font-mono text-foreground">{droppedInternalId}</code>
+                            <Badge variant="outline" className="text-[10px] border-mutant-green/50 text-mutant-green">
+                              🔒 Locked
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {droppedFiles.length} files processed
+                            {autoFilledFields.length > 0 && ` · ${autoFilledFields.length} fields auto-filled`}
+                          </p>
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={handleStartOver} className="gap-1.5 border-border">
+                        <RotateCcw className="w-3 h-3" /> Start Over
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Auto-filled fields summary */}
+                {autoFilledFields.length > 0 && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Sparkles className="w-3.5 h-3.5 text-modded-gold" />
+                    <span className="text-muted-foreground">Auto-filled:</span>
+                    <div className="flex flex-wrap gap-1">
+                      {autoFilledFields.slice(0, 8).map((f) => (
+                        <Badge key={f} variant="outline" className="text-[10px] border-modded-gold/30 text-modded-gold">
+                          {f}
+                        </Badge>
+                      ))}
+                      {autoFilledFields.length > 8 && (
+                        <Badge variant="outline" className="text-[10px] border-border">
+                          +{autoFilledFields.length - 8} more
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Form Tabs */}
+                <div className="bg-card border border-border rounded-xl overflow-hidden">
+                  {showStructureTab ? (
+                    <Tabs defaultValue="general">
+                      <TabsList className="w-full grid grid-cols-4 bg-secondary rounded-none border-b border-border">
+                        <TabsTrigger value="general" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <Settings2 className="w-3 h-3 mr-1" /> General
+                        </TabsTrigger>
+                        <TabsTrigger value="structure" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <Building2 className="w-3 h-3 mr-1" /> Structure
+                        </TabsTrigger>
+                        <TabsTrigger value="combat" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <Swords className="w-3 h-3 mr-1" /> Combat
+                        </TabsTrigger>
+                        <TabsTrigger value="icon" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <Wand2 className="w-3 h-3 mr-1" /> Icon
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="general"><TabGeneral form={form} setForm={setForm} /></TabsContent>
+                      <TabsContent value="structure"><TabStructure form={form} setForm={setForm} /></TabsContent>
+                      <TabsContent value="combat"><TabCombat form={form} setForm={setForm} /></TabsContent>
+                      <TabsContent value="icon">
+                        <IconGenerator
+                          unitData={{
+                            internalId: form.internalName,
+                            displayName: form.displayName,
+                            faction: form.faction,
+                            category: form.category,
+                            renderType: form.renderType,
+                          }}
+                          onIconReady={handleIconReady}
+                          currentIcon={iconImageFile}
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  ) : (
+                    <Tabs defaultValue="general">
+                      <TabsList className="w-full grid grid-cols-6 bg-secondary rounded-none border-b border-border">
+                        <TabsTrigger value="general" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <Settings2 className="w-3 h-3 mr-1" /> General
+                        </TabsTrigger>
+                        <TabsTrigger value="combat" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <Swords className="w-3 h-3 mr-1" /> Combat
+                        </TabsTrigger>
+                        <TabsTrigger value="physics" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <Gauge className="w-3 h-3 mr-1" /> Physics
+                        </TabsTrigger>
+                        <TabsTrigger value="art" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <ImageIcon className="w-3 h-3 mr-1" /> Art
+                        </TabsTrigger>
+                        <TabsTrigger value="voice" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <Volume2 className="w-3 h-3 mr-1" /> Voice
+                        </TabsTrigger>
+                        <TabsTrigger value="icon" className="font-display text-xs data-[state=active]:bg-card data-[state=active]:text-foreground rounded-none">
+                          <Wand2 className="w-3 h-3 mr-1" /> Icon
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="general"><TabGeneral form={form} setForm={setForm} /></TabsContent>
+                      <TabsContent value="combat"><TabCombat form={form} setForm={setForm} /></TabsContent>
+                      <TabsContent value="physics"><TabPhysics form={form} setForm={setForm} /></TabsContent>
+                      <TabsContent value="art"><TabArt form={form} setForm={setForm} /></TabsContent>
+                      <TabsContent value="voice"><TabVoice form={form} setForm={setForm} /></TabsContent>
+                      <TabsContent value="icon">
+                        <IconGenerator
+                          unitData={{
+                            internalId: form.internalName,
+                            displayName: form.displayName,
+                            faction: form.faction,
+                            category: form.category,
+                            renderType: form.renderType,
+                          }}
+                          onIconReady={handleIconReady}
+                          currentIcon={iconImageFile}
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  )}
+
+                  <INIPreview form={form} />
+
+                  {/* Validation hints + Mint */}
+                  <div className="p-4 border-t border-border space-y-3">
+                    <div className="flex flex-wrap gap-2 empty:hidden">
+                      {nameEmpty && (
+                        <Badge variant="outline" className="text-xs text-destructive border-destructive/50 gap-1">
+                          <AlertTriangle className="w-3 h-3" /> Internal name required
+                        </Badge>
+                      )}
+                      {nameTooLong && (
+                        <Badge variant="outline" className="text-xs text-destructive border-destructive/50 gap-1">
+                          <AlertTriangle className="w-3 h-3" /> Max 8 characters
+                        </Badge>
+                      )}
+                      {nameCollision && !nameEmpty && (
+                        <Badge variant="outline" className="text-xs text-modded-gold border-modded-gold/50 gap-1">
+                          <AlertTriangle className="w-3 h-3" /> Conflicts with base game unit
+                        </Badge>
+                      )}
+                      {form.renderType === 'VOXEL' && (!form.vxlFile || !form.hvaFile) && (
+                        <Badge variant="outline" className="text-xs text-destructive border-destructive/50 gap-1">
+                          <AlertTriangle className="w-3 h-3" /> VXL + HVA files required
+                        </Badge>
+                      )}
+                    </div>
+
+                    <Button
+                      onClick={handleMint}
+                      disabled={mintMutation.isPending || nameEmpty || !form.displayName}
+                      className="w-full bg-modded-gold hover:bg-modded-gold-glow text-black font-display text-sm h-12"
+                    >
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      {mintMutation.isPending ? 'MINTING...' : isStructure ? 'MINT STRUCTURE' : '✨ MINT UNIT'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </div>
         </div>
       </div>
