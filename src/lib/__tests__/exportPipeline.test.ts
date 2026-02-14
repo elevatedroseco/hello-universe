@@ -103,7 +103,6 @@ describe('Export Pipeline E2E', () => {
     it('all fixture units pass validation', () => {
       const issues = runValidation(ALL_UNITS);
       const errors = issues.filter(i => i.severity === 'error');
-      // The voxel unit has file paths so it should pass; structure has valid foundation
       expect(errors).toHaveLength(0);
     });
 
@@ -127,26 +126,21 @@ describe('Export Pipeline E2E', () => {
       const parsed = TiberianSunINIParser.parse(SAMPLE_RULES_INI);
       const injected = TiberianSunINIParser.injectUnits(parsed, ALL_UNITS);
 
-      // Infantry list should now contain TSTUNIT
       const infValues = Object.values(injected.data['InfantryTypes']);
       expect(infValues).toContain('TSTUNIT');
 
-      // Vehicle list should contain VXTANK
       const vehValues = Object.values(injected.data['VehicleTypes']);
       expect(vehValues).toContain('VXTANK');
 
-      // Aircraft list should contain NCRAFT
       const airValues = Object.values(injected.data['AircraftTypes']);
       expect(airValues).toContain('NCRAFT');
 
-      // Building list should contain GFORT
       const bldValues = Object.values(injected.data['BuildingTypes']);
       expect(bldValues).toContain('GFORT');
     });
 
     it('does not duplicate units already in the list', () => {
       const parsed = TiberianSunINIParser.parse(SAMPLE_RULES_INI);
-      // Inject twice
       const once = TiberianSunINIParser.injectUnits(parsed, ALL_UNITS);
       const twice = TiberianSunINIParser.injectUnits(once, ALL_UNITS);
 
@@ -160,24 +154,20 @@ describe('Export Pipeline E2E', () => {
       const injected = TiberianSunINIParser.injectUnits(parsed, ALL_UNITS);
       const withDefs = TiberianSunINIParser.addUnitDefinitions(injected, ALL_UNITS);
 
-      // Check infantry definition
       expect(withDefs.data['TSTUNIT']).toBeDefined();
       expect(withDefs.data['TSTUNIT'].Name).toBe('Test Unit');
       expect(withDefs.data['TSTUNIT'].Cost).toBe('300');
       expect(withDefs.data['TSTUNIT'].Category).toBe('Soldier');
       expect(withDefs.data['TSTUNIT'].Locomotor).toContain('4A582741');
 
-      // Check vehicle definition
       expect(withDefs.data['VXTANK']).toBeDefined();
       expect(withDefs.data['VXTANK'].Category).toBe('AFV');
       expect(withDefs.data['VXTANK'].Turret).toBe('yes');
 
-      // Check aircraft definition
       expect(withDefs.data['NCRAFT']).toBeDefined();
       expect(withDefs.data['NCRAFT'].Category).toBe('AirPower');
       expect(withDefs.data['NCRAFT'].Landable).toBe('yes');
 
-      // Check structure definition
       expect(withDefs.data['GFORT']).toBeDefined();
       expect(withDefs.data['GFORT'].Power).toBe('50');
       expect(withDefs.data['GFORT'].BaseNormal).toBe('yes');
@@ -231,15 +221,12 @@ describe('Export Pipeline E2E', () => {
     });
 
     it('skips units already defined in base art.ini', () => {
-      // E1 is already in SAMPLE_ART_INI
       const existingUnit = makeUnit({ internalName: 'E1' });
       const parsed = TiberianSunINIParser.parse(SAMPLE_ART_INI);
       const withArt = TiberianSunINIParser.addArtDefinitions(parsed, [existingUnit]);
 
-      // E1 should still have the original Image=E1, not be overwritten
       expect(withArt.data['E1'].Image).toBe('E1');
       expect(withArt.data['E1'].Sequence).toBe('InfantrySequence');
-      // Should NOT have Cameo added (skipped)
       expect(withArt.data['E1'].Cameo).toBeUndefined();
     });
   });
@@ -259,14 +246,15 @@ describe('Export Pipeline E2E', () => {
       ];
       const mix = buildEcacheMix(files);
 
-      // Header: 2 bytes filecount + 4 bytes datasize = 6
+      // Header: 4 (flags) + 2 (count) + 4 (datasize) = 10
       // Index: 2 * 12 = 24
       // Data: 1024 + 256 = 1280
-      expect(mix.byteLength).toBe(6 + 24 + 1280);
+      expect(mix.byteLength).toBe(10 + 24 + 1280);
 
       const view = new DataView(mix.buffer);
-      expect(view.getUint16(0, true)).toBe(2);       // file count
-      expect(view.getUint32(2, true)).toBe(1280);     // data size
+      expect(view.getUint32(0, true)).toBe(0);         // flags
+      expect(view.getUint16(4, true)).toBe(2);          // file count
+      expect(view.getUint32(6, true)).toBe(1280);       // data size
     });
 
     it('builds expand99.mix with VXL/HVA entries', () => {
@@ -276,12 +264,12 @@ describe('Export Pipeline E2E', () => {
       ];
       const mix = buildEcacheMix(files);
 
-      expect(mix.byteLength).toBe(6 + 24 + 2560);
+      expect(mix.byteLength).toBe(10 + 24 + 2560);
       const view = new DataView(mix.buffer);
-      expect(view.getUint16(0, true)).toBe(2);
+      expect(view.getUint16(4, true)).toBe(2);
     });
 
-    it('sorts index entries by hash ascending', () => {
+    it('sorts index entries by CRC32 hash ascending', () => {
       const files = [
         makeFakeFile('ZZZZZ.SHP', 100),
         makeFakeFile('AAAAA.SHP', 100),
@@ -290,10 +278,10 @@ describe('Export Pipeline E2E', () => {
       const mix = buildEcacheMix(files);
       const view = new DataView(mix.buffer);
 
-      // Read 3 hashes from index (starting at byte 6)
-      const h1 = view.getUint32(6, true);
-      const h2 = view.getUint32(18, true);
-      const h3 = view.getUint32(30, true);
+      // Index starts at byte 10
+      const h1 = view.getUint32(10, true);
+      const h2 = view.getUint32(22, true);
+      const h3 = view.getUint32(34, true);
 
       expect(h1).toBeLessThanOrEqual(h2);
       expect(h2).toBeLessThanOrEqual(h3);
@@ -304,13 +292,11 @@ describe('Export Pipeline E2E', () => {
 
   describe('Step 5: Assemble mod-only ZIP', () => {
     it('produces a valid ZIP with rules.ini, art.ini, and MIX', async () => {
-      // 1. Generate INI
       const parsed = TiberianSunINIParser.parse(SAMPLE_RULES_INI);
       const injected = TiberianSunINIParser.injectUnits(parsed, [SHP_INFANTRY]);
       const withDefs = TiberianSunINIParser.addUnitDefinitions(injected, [SHP_INFANTRY]);
       const rulesContent = TiberianSunINIParser.stringify(withDefs);
 
-      // 2. Generate Art
       const artParsed = TiberianSunINIParser.parse('');
       const withArt = TiberianSunINIParser.addArtDefinitions(artParsed, [SHP_INFANTRY]);
       let artContent = '';
@@ -322,14 +308,12 @@ describe('Export Pipeline E2E', () => {
         artContent += '\n';
       }
 
-      // 3. Build MIX
       const shpFiles: MixFileEntry[] = [
         { name: 'TSTUNIT.SHP', data: new Uint8Array(512).buffer },
         { name: 'TSTUICON.SHP', data: new Uint8Array(128).buffer },
       ];
       const ecacheMix = buildEcacheMix(shpFiles);
 
-      // 4. Assemble ZIP
       const zip = new JSZip();
       zip.file('rules.ini', rulesContent);
       zip.file('art.ini', artContent);
@@ -339,27 +323,24 @@ describe('Export Pipeline E2E', () => {
       const blob = await zip.generateAsync({ type: 'uint8array' });
       expect(blob.byteLength).toBeGreaterThan(0);
 
-      // 5. Verify ZIP contents
       const loaded = await JSZip.loadAsync(blob);
       expect(loaded.file('rules.ini')).not.toBeNull();
       expect(loaded.file('art.ini')).not.toBeNull();
       expect(loaded.file('ecache99.mix')).not.toBeNull();
       expect(loaded.file('MOD_README.txt')).not.toBeNull();
 
-      // 6. Verify rules.ini content inside ZIP
       const rulesInZip = await loaded.file('rules.ini')!.async('string');
       expect(rulesInZip).toContain('[TSTUNIT]');
       expect(rulesInZip).toContain('Name=Test Unit');
       expect(rulesInZip).toContain('Cost=300');
 
-      // 7. Verify art.ini content
       const artInZip = await loaded.file('art.ini')!.async('string');
       expect(artInZip).toContain('[TSTUNIT]');
       expect(artInZip).toContain('Cameo=TSTUNITICON');
 
-      // 8. Verify MIX is binary and correct size
+      // MIX now has 10-byte header
       const mixInZip = await loaded.file('ecache99.mix')!.async('uint8array');
-      expect(mixInZip.byteLength).toBe(6 + 24 + 640);
+      expect(mixInZip.byteLength).toBe(10 + 24 + 640);
     });
   });
 
@@ -367,21 +348,17 @@ describe('Export Pipeline E2E', () => {
 
   describe('Step 6: Full pipeline with all unit types', () => {
     it('handles infantry + vehicle + aircraft + structure in one export', async () => {
-      // Validate
       const errors = runValidation(ALL_UNITS).filter(i => i.severity === 'error');
       expect(errors).toHaveLength(0);
 
-      // Generate rules
       const parsed = TiberianSunINIParser.parse(SAMPLE_RULES_INI);
       const injected = TiberianSunINIParser.injectUnits(parsed, ALL_UNITS);
       const withDefs = TiberianSunINIParser.addUnitDefinitions(injected, ALL_UNITS);
       const rules = TiberianSunINIParser.stringify(withDefs);
 
-      // Generate art
       const artParsed = TiberianSunINIParser.parse(SAMPLE_ART_INI);
       const withArt = TiberianSunINIParser.addArtDefinitions(artParsed, ALL_UNITS);
 
-      // Build MIX files
       const shpFiles: MixFileEntry[] = [
         { name: 'TSTUNIT.SHP', data: new Uint8Array(512).buffer },
       ];
@@ -393,7 +370,6 @@ describe('Export Pipeline E2E', () => {
       const ecache = buildEcacheMix(shpFiles);
       const expand = buildEcacheMix(vxlFiles);
 
-      // Assemble ZIP
       const zip = new JSZip();
       zip.file('rules.ini', rules);
       zip.file('ecache99.mix', ecache);
@@ -402,29 +378,21 @@ describe('Export Pipeline E2E', () => {
       const blob = await zip.generateAsync({ type: 'uint8array' });
       const loaded = await JSZip.loadAsync(blob);
 
-      // Verify all files present
       expect(loaded.file('rules.ini')).not.toBeNull();
       expect(loaded.file('ecache99.mix')).not.toBeNull();
       expect(loaded.file('expand99.mix')).not.toBeNull();
 
-      // Verify rules content has all units
       const rulesOut = await loaded.file('rules.ini')!.async('string');
       expect(rulesOut).toContain('[TSTUNIT]');
       expect(rulesOut).toContain('[VXTANK]');
       expect(rulesOut).toContain('[NCRAFT]');
       expect(rulesOut).toContain('[GFORT]');
-
-      // Verify structure-specific fields
       expect(rulesOut).toContain('Power=50');
       expect(rulesOut).toContain('BaseNormal=yes');
-
-      // Verify aircraft fields
       expect(rulesOut).toContain('Landable=yes');
 
-      // Art has voxel and SHP entries
       expect(withArt.data['VXTANK'].Voxel).toBe('yes');
       expect(withArt.data['TSTUNIT'].Image).toBe('TSTUNIT');
-      // E1 was skipped (already in base)
       expect(withArt.data['E1'].Cameo).toBeUndefined();
     });
   });
