@@ -140,7 +140,9 @@ export const useCustomUnits = () => {
             Strength: input.strength,
             Speed: input.speed,
             Owner: input.faction,
-            Prerequisite: input.category === 'Infantry' ? 'BARRACKS' : 'FACTORY',
+            Prerequisite: input.category === 'Infantry'
+              ? (input.faction === 'GDI' ? 'GAPILE' : 'NAHAND')
+              : (input.faction === 'GDI' ? 'GAWEAP' : 'NAWEAP'),
             Primary: input.primaryWeapon || '',
             Secondary: input.secondaryWeapon || '',
             Armor: input.armor || 'none',
@@ -214,7 +216,9 @@ export const useCustomUnits = () => {
         Secondary: input.secondaryWeapon || '',
         Sight: input.sightRange ?? 5,
         Locomotor: input.locomotor || 'Foot',
-        Prerequisite: input.category === 'Infantry' ? 'BARRACKS' : 'FACTORY',
+        Prerequisite: input.category === 'Infantry'
+          ? (input.faction === 'GDI' ? 'GAPILE' : 'NAHAND')
+          : (input.faction === 'GDI' ? 'GAWEAP' : 'NAWEAP'),
         Crushable: input.crushable !== undefined ? (input.crushable ? 'yes' : 'no') : (input.category === 'Infantry' ? 'yes' : 'no'),
         Crusher: input.crusher !== undefined ? (input.crusher ? 'yes' : 'no') : (input.category === 'Vehicle' ? 'yes' : 'no'),
       };
