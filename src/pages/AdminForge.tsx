@@ -25,6 +25,7 @@ interface ForgeUnit {
   name: string;
   faction: string;
   category: string;
+  render_type?: string;
 }
 
 const AdminForge = () => {
@@ -39,10 +40,17 @@ const AdminForge = () => {
       const client = requireSupabase();
       const { data, error } = await client
         .from('custom_units')
-        .select('id, internal_name, name, faction, category')
+        .select('*')
         .order('internal_name');
       if (error) throw error;
-      return (data ?? []) as ForgeUnit[];
+      return (data ?? []).map((row: any) => ({
+        id: row.id,
+        internal_name: row.internal_name,
+        name: row.name,
+        faction: row.faction,
+        category: row.category,
+        render_type: row.render_type || 'SHP',
+      })) as ForgeUnit[];
     },
     enabled: isSupabaseConfigured,
   });
@@ -58,8 +66,20 @@ const AdminForge = () => {
       const client = requireSupabase();
       let shpFilePath: string | null = null;
       let iconFilePath: string | null = null;
+      let vxlFilePath: string | null = null;
+      let hvaFilePath: string | null = null;
+      let turretVxlPath: string | null = null;
+      let barrelVxlPath: string | null = null;
 
-      if (formData.spriteFile) {
+      const isVoxel = formData.renderType === 'VOXEL';
+
+      // Validate voxel files
+      if (isVoxel && (!formData.vxlFile || !formData.hvaFile)) {
+        throw new Error('Voxel units require both VXL and HVA files');
+      }
+
+      // Upload SHP sprite (for SHP render type)
+      if (!isVoxel && formData.spriteFile) {
         const fileName = `${formData.internalName.toLowerCase()}_${Date.now()}.shp`;
         const filePath = `units/${fileName}`;
         const { error } = await client.storage.from('user_assets').upload(filePath, formData.spriteFile, { upsert: true });
@@ -67,6 +87,39 @@ const AdminForge = () => {
         shpFilePath = filePath;
       }
 
+      // Upload VXL file
+      if (isVoxel && formData.vxlFile) {
+        const filePath = `units/${formData.internalName.toUpperCase()}.VXL`;
+        const { error } = await client.storage.from('user_assets').upload(filePath, formData.vxlFile, { upsert: true });
+        if (error) throw error;
+        vxlFilePath = filePath;
+      }
+
+      // Upload HVA file
+      if (isVoxel && formData.hvaFile) {
+        const filePath = `units/${formData.internalName.toUpperCase()}.HVA`;
+        const { error } = await client.storage.from('user_assets').upload(filePath, formData.hvaFile, { upsert: true });
+        if (error) throw error;
+        hvaFilePath = filePath;
+      }
+
+      // Upload turret VXL
+      if (isVoxel && formData.hasTurret && formData.turretVxlFile) {
+        const filePath = `units/${formData.internalName.toUpperCase()}TUR.VXL`;
+        const { error } = await client.storage.from('user_assets').upload(filePath, formData.turretVxlFile, { upsert: true });
+        if (error) throw error;
+        turretVxlPath = filePath;
+      }
+
+      // Upload barrel VXL
+      if (isVoxel && formData.hasBarrel && formData.barrelVxlFile) {
+        const filePath = `units/${formData.internalName.toUpperCase()}BARL.VXL`;
+        const { error } = await client.storage.from('user_assets').upload(filePath, formData.barrelVxlFile, { upsert: true });
+        if (error) throw error;
+        barrelVxlPath = filePath;
+      }
+
+      // Upload icon/cameo (always SHP)
       if (formData.iconFile) {
         const iconName = `${formData.internalName.toLowerCase()}_icon_${Date.now()}.shp`;
         const iconPath = `units/${iconName}`;
@@ -78,7 +131,7 @@ const AdminForge = () => {
       const locoGuid = TS_LOCOMOTORS.find((l) => l.id === formData.locomotor)?.guid || '';
       const cameoId = (formData.internalName.substring(0, 4) + 'ICON').toUpperCase();
 
-      const rulesJson = {
+      const rulesJson: Record<string, unknown> = {
         Category: formData.category,
         Cost: formData.cost,
         Strength: formData.strength,
@@ -107,28 +160,52 @@ const AdminForge = () => {
         Points: formData.points,
       };
 
-      const artJson = {
-        Image: formData.internalName,
-        Cameo: cameoId,
-        Sequence: formData.category === 'Infantry' ? formData.sequence : undefined,
+      // Add voxel-specific rules
+      if (isVoxel && formData.hasTurret) {
+        rulesJson.Turret = true;
+      }
+
+      const artJson: Record<string, unknown> = isVoxel
+        ? {
+            Voxel: 'yes',
+            Remapable: 'yes',
+            Shadow: 'yes',
+            Normalized: 'yes',
+            Cameo: cameoId,
+            PrimaryFireFLH: formData.primaryFireFLH,
+            SecondaryFireFLH: formData.secondaryFireFLH,
+            TurretOffset: formData.turretOffset,
+            Turret: formData.hasTurret ? 'yes' : undefined,
+          }
+        : {
+            Image: formData.internalName,
+            Cameo: cameoId,
+            Sequence: formData.category === 'Infantry' ? formData.sequence : undefined,
+          };
+
+      const insertData: Record<string, unknown> = {
+        internal_name: formData.internalName,
+        name: formData.displayName,
+        faction: formData.faction,
+        category: formData.category,
+        cost: formData.cost,
+        strength: formData.strength,
+        speed: formData.speed,
+        tech_level: formData.techLevel,
+        shp_file_path: shpFilePath,
+        icon_file_path: iconFilePath,
+        rules_json: rulesJson,
+        art_json: artJson,
+        render_type: formData.renderType,
+        vxl_file_path: vxlFilePath,
+        hva_file_path: hvaFilePath,
+        turret_vxl_path: turretVxlPath,
+        barrel_vxl_path: barrelVxlPath,
       };
 
       const { data, error } = await client
         .from('custom_units')
-        .insert({
-          internal_name: formData.internalName,
-          name: formData.displayName,
-          faction: formData.faction,
-          category: formData.category,
-          cost: formData.cost,
-          strength: formData.strength,
-          speed: formData.speed,
-          tech_level: formData.techLevel,
-          shp_file_path: shpFilePath,
-          icon_file_path: iconFilePath,
-          rules_json: rulesJson,
-          art_json: artJson,
-        })
+        .insert(insertData as any)
         .select()
         .single();
 
@@ -149,6 +226,10 @@ const AdminForge = () => {
   const handleMint = () => {
     if (!form.internalName || !form.displayName) {
       toast.error('Internal Name and Display Name are required');
+      return;
+    }
+    if (form.renderType === 'VOXEL' && (!form.vxlFile || !form.hvaFile)) {
+      toast.error('Voxel units require both VXL and HVA files');
       return;
     }
     if (ORIGINAL_GAME_UNITS.has(form.internalName.toUpperCase())) {
@@ -212,7 +293,10 @@ const AdminForge = () => {
                 <div key={unit.id} className="flex items-center justify-between px-3 py-2.5 group hover:bg-secondary/50 transition-colors">
                   <div className="min-w-0 flex-1">
                     <span className="font-mono text-sm text-foreground block truncate">{unit.internal_name}</span>
-                    <span className="text-xs text-muted-foreground truncate block">{unit.name} · {unit.faction}</span>
+                    <span className="text-xs text-muted-foreground truncate block">
+                      {unit.name} · {unit.faction}
+                      {unit.render_type === 'VOXEL' && <span className="ml-1 text-primary">⬡</span>}
+                    </span>
                   </div>
                   <button
                     onClick={() => setRenamingUnit(unit)}
@@ -281,6 +365,11 @@ const AdminForge = () => {
                   {nameCollision && !nameEmpty && (
                     <Badge variant="outline" className="text-xs text-modded-gold border-modded-gold/50 gap-1">
                       <AlertTriangle className="w-3 h-3" /> Conflicts with base game unit
+                    </Badge>
+                  )}
+                  {form.renderType === 'VOXEL' && (!form.vxlFile || !form.hvaFile) && (
+                    <Badge variant="outline" className="text-xs text-destructive border-destructive/50 gap-1">
+                      <AlertTriangle className="w-3 h-3" /> VXL + HVA files required
                     </Badge>
                   )}
                 </div>

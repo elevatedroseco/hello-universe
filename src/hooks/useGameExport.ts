@@ -42,17 +42,19 @@ async function downloadFromStorage(filePath: string): Promise<Blob | null> {
  * Generate installation instructions
  */
 function generateReadme(units: CustomUnit[]): string {
+  const shpUnits = units.filter(u => u.renderType !== 'VOXEL');
+  const vxlUnits = units.filter(u => u.renderType === 'VOXEL');
   return `==============================================================
   TIBERIAN SUN CUSTOM MOD — Installation Guide
 ==============================================================
 
 Generated: ${new Date().toLocaleString()}
-Custom Units: ${units.length}
+Custom Units: ${units.length} (${shpUnits.length} SHP, ${vxlUnits.length} Voxel)
 
 WHAT'S INCLUDED:
   ✅ rules.ini  — MERGED (original game + ${units.length} custom units)
   ✅ art.ini    — MERGED (original game + custom unit art)
-  ✅ ecache99.mix — Custom unit sprites & icons (SHP files)
+  ✅ ecache99.mix — Custom unit sprites & icons (SHP files)${vxlUnits.length > 0 ? '\n  ✅ expand99.mix — Voxel models (VXL/HVA files)' : ''}
   ✅ All original game content PRESERVED
 
 INSTALLATION:
@@ -64,24 +66,24 @@ INSTALLATION:
 HOW IT WORKS:
   • rules.ini and art.ini in the root folder override the versions
     inside tibsun.mix / patch.mix (engine priority).
-  • ecache99.mix is scanned automatically by the engine for SHP files.
+  • ecache99.mix is scanned automatically by the engine for SHP files.${vxlUnits.length > 0 ? '\n  • expand99.mix is scanned for VXL/HVA voxel models.' : ''}
   • No original MIX archives are modified.
 
 CUSTOM UNITS:
-${units.map((u, i) => `  ${i + 1}. ${u.displayName} (${u.internalName}) — ${u.faction} ${u.category}, $${u.cost}`).join('\n')}
+${units.map((u, i) => `  ${i + 1}. ${u.displayName} (${u.internalName}) — ${u.faction} ${u.category}${u.renderType === 'VOXEL' ? ' [VOXEL]' : ''}, $${u.cost}`).join('\n')}
 
 VERIFICATION:
   1. rules.ini should be ~500–700 KB
   2. art.ini   should be ~300–400 KB
-  3. ecache99.mix should exist in the root folder
+  3. ecache99.mix should exist in the root folder${vxlUnits.length > 0 ? '\n  4. expand99.mix should exist in the root folder' : ''}
   4. Start skirmish, build prerequisite, see custom units in sidebar.
 
 REVERTING:
-  Delete rules.ini, art.ini, and ecache99.mix from the root folder.
+  Delete rules.ini, art.ini, ecache99.mix${vxlUnits.length > 0 ? ', and expand99.mix' : ''} from the root folder.
   The game falls back to originals inside its MIX archives.
 
 MULTIPLAYER:
-  ⚠️  All players need identical rules.ini + ecache99.mix.
+  ⚠️  All players need identical rules.ini + ecache99.mix${vxlUnits.length > 0 ? ' + expand99.mix' : ''}.
 
 Created with TibSun Mod Kit — https://tibsunmod.lovable.app
 `;
@@ -170,26 +172,67 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       zip.file(`${gameRoot}art.ini`, finalArt);
       console.log(`✅ Wrote merged rules.ini (${(finalRules.length / 1024).toFixed(0)} KB) and art.ini (${(finalArt.length / 1024).toFixed(0)} KB)`);
 
-      // ── F: Download SHP files ─────────────────────────────
+      // ── F: Download SHP + VXL/HVA files ──────────────────
       setExportProgress(55, 'Downloading unit graphics...');
       const shpFiles: MixFileEntry[] = [];
+      const vxlFiles: MixFileEntry[] = [];
       const perUnit = 25 / selectedUnits.length;
       let shpProgress = 55;
 
       for (const unit of selectedUnits) {
         setExportProgress(Math.floor(shpProgress), `Packaging ${unit.displayName}...`);
+        const isVoxel = unit.renderType === 'VOXEL';
 
-        // Main sprite
-        if (unit.shpFilePath) {
-          const blob = await downloadFromStorage(unit.shpFilePath);
-          if (blob) {
-            const name = unit.internalName.substring(0, 8).toUpperCase() + '.SHP';
-            shpFiles.push({ name, data: await blob.arrayBuffer() });
-            console.log(`✅ SHP: ${name}`);
+        if (isVoxel) {
+          // Download VXL
+          if (unit.voxelFilePath) {
+            const blob = await downloadFromStorage(unit.voxelFilePath);
+            if (blob) {
+              const name = unit.internalName.substring(0, 8).toUpperCase() + '.VXL';
+              vxlFiles.push({ name, data: await blob.arrayBuffer() });
+              console.log(`✅ VXL: ${name}`);
+            }
+          }
+          // Download HVA
+          if (unit.hvaFilePath) {
+            const blob = await downloadFromStorage(unit.hvaFilePath);
+            if (blob) {
+              const name = unit.internalName.substring(0, 8).toUpperCase() + '.HVA';
+              vxlFiles.push({ name, data: await blob.arrayBuffer() });
+              console.log(`✅ HVA: ${name}`);
+            }
+          }
+          // Download turret VXL
+          if (unit.turretVxlPath) {
+            const blob = await downloadFromStorage(unit.turretVxlPath);
+            if (blob) {
+              const name = unit.internalName.substring(0, 5).toUpperCase() + 'TUR.VXL';
+              vxlFiles.push({ name, data: await blob.arrayBuffer() });
+              console.log(`✅ Turret VXL: ${name}`);
+            }
+          }
+          // Download barrel VXL
+          if (unit.barrelVxlPath) {
+            const blob = await downloadFromStorage(unit.barrelVxlPath);
+            if (blob) {
+              const name = unit.internalName.substring(0, 4).toUpperCase() + 'BARL.VXL';
+              vxlFiles.push({ name, data: await blob.arrayBuffer() });
+              console.log(`✅ Barrel VXL: ${name}`);
+            }
+          }
+        } else {
+          // Main SHP sprite
+          if (unit.shpFilePath) {
+            const blob = await downloadFromStorage(unit.shpFilePath);
+            if (blob) {
+              const name = unit.internalName.substring(0, 8).toUpperCase() + '.SHP';
+              shpFiles.push({ name, data: await blob.arrayBuffer() });
+              console.log(`✅ SHP: ${name}`);
+            }
           }
         }
 
-        // Icon / cameo
+        // Icon / cameo (always SHP)
         if (unit.icon_file_path) {
           const blob = await downloadFromStorage(unit.icon_file_path);
           if (blob) {
@@ -202,13 +245,20 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
         shpProgress += perUnit;
       }
 
-      // ── G: Build ecache99.mix at game root ────────────────
+      // ── G: Build ecache99.mix (SHPs) at game root ────────
       if (shpFiles.length > 0) {
         setExportProgress(80, `Building ecache99.mix (${shpFiles.length} sprites)...`);
         const mixData = buildEcacheMix(shpFiles);
-        // FIX 2: ecache99.mix MUST be at game root (same level as Game.exe)
         zip.file(`${gameRoot}ecache99.mix`, mixData);
         console.log(`✅ ecache99.mix: ${(mixData.byteLength / 1024).toFixed(0)} KB, ${shpFiles.length} files`);
+      }
+
+      // ── G2: Build expand99.mix (VXL/HVA) at game root ────
+      if (vxlFiles.length > 0) {
+        setExportProgress(83, `Building expand99.mix (${vxlFiles.length} voxel files)...`);
+        const vxlMixData = buildEcacheMix(vxlFiles);
+        zip.file(`${gameRoot}expand99.mix`, vxlMixData);
+        console.log(`✅ expand99.mix: ${(vxlMixData.byteLength / 1024).toFixed(0)} KB, ${vxlFiles.length} files`);
       }
 
       // ── H: README ─────────────────────────────────────────

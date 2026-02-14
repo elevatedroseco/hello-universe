@@ -402,47 +402,69 @@ export class TiberianSunINIParser {
       const art = (unit.artJson || {}) as Record<string, unknown>;
       const unitName = unit.internalName.toUpperCase();
       const iconName = (unitName.substring(0, 4) + 'ICON').toUpperCase();
+      const isVoxel = unit.renderType === 'VOXEL';
 
       // FIX 6: Skip if this section already exists in the base art.ini
-      // (prevents overwriting base game animation data like JUMPJET, E1, etc.)
       if (sectionOrder.includes(unitName)) {
         console.log(`⏭️ Skipping art for ${unitName} — already defined in base art.ini`);
         continue;
       }
 
-      // Build the art block
-      const artBlock: INISection = {
-        Image: unitName,
-        Cameo: String(art.Cameo || iconName),  // FIX 5: Always include Cameo
-      };
-
-      if (unit.category === 'Infantry') {
-        Object.assign(artBlock, {
-          Sequence: (art.Sequence || 'InfantrySequence').toString(),
-          ActiveAnim: 'Idle',
-          Crawler: 'no',
-          Remapable: 'yes'
-        });
-      } else if (unit.category === 'Vehicle') {
-        Object.assign(artBlock, {
-          Voxel: 'no',
-          Shadow: 'yes',
+      if (isVoxel) {
+        // Voxel art block
+        const artBlock: INISection = {
+          Voxel: 'yes',
           Remapable: 'yes',
-          Normalized: 'yes'
-        });
-      } else if (unit.category === 'Aircraft') {
-        Object.assign(artBlock, {
-          Voxel: 'no',
           Shadow: 'yes',
-          Rotors: 'yes',
-          PitchSpeed: '0.5'
-        });
+          Normalized: 'yes',
+          Cameo: String(art.Cameo || iconName),
+          PrimaryFireFLH: String(art.PrimaryFireFLH || '0,0,100'),
+          SecondaryFireFLH: String(art.SecondaryFireFLH || '0,0,100'),
+        };
+
+        if (art.TurretOffset !== undefined) {
+          artBlock.TurretOffset = String(art.TurretOffset);
+        }
+        if (art.Turret === 'yes') {
+          artBlock.Turret = 'yes';
+        }
+
+        modified[unitName] = artBlock;
+      } else {
+        // SHP art block (existing logic)
+        const artBlock: INISection = {
+          Image: unitName,
+          Cameo: String(art.Cameo || iconName),
+        };
+
+        if (unit.category === 'Infantry') {
+          Object.assign(artBlock, {
+            Sequence: (art.Sequence || 'InfantrySequence').toString(),
+            ActiveAnim: 'Idle',
+            Crawler: 'no',
+            Remapable: 'yes'
+          });
+        } else if (unit.category === 'Vehicle') {
+          Object.assign(artBlock, {
+            Voxel: 'no',
+            Shadow: 'yes',
+            Remapable: 'yes',
+            Normalized: 'yes'
+          });
+        } else if (unit.category === 'Aircraft') {
+          Object.assign(artBlock, {
+            Voxel: 'no',
+            Shadow: 'yes',
+            Rotors: 'yes',
+            PitchSpeed: '0.5'
+          });
+        }
+
+        artBlock.SecondaryFireOffset = '0,0,0';
+        modified[unitName] = artBlock;
       }
 
-      artBlock.SecondaryFireOffset = '0,0,0';
-      modified[unitName] = artBlock;
-
-      console.log(`✅ Added art definition: [${unitName}]`);
+      console.log(`✅ Added art definition: [${unitName}] (${isVoxel ? 'VOXEL' : 'SHP'})`);
     }
 
     return { data: modified, sectionOrder, rawLines: parseResult.rawLines };

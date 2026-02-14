@@ -14,13 +14,14 @@ interface INIPreviewProps {
 function generatePreview(form: UnitForm): string {
   const loco = TS_LOCOMOTORS.find((l) => l.id === form.locomotor)?.guid || '';
   const cameoId = (form.internalName.substring(0, 4) + 'ICON').toUpperCase();
+  const isVoxel = form.renderType === 'VOXEL';
   const listType = form.category === 'Infantry'
     ? 'InfantryTypes'
     : form.category === 'Aircraft'
       ? 'AircraftTypes'
       : 'VehicleTypes';
 
-  return `; Preview — what will be added to rules.ini
+  const rulesSection = `; Preview — what will be added to rules.ini
 ; ================================================
 
 [${listType}]
@@ -42,11 +43,26 @@ Locomotor=${loco}
 Owner=${form.faction}
 Image=${form.internalName || 'MYUNIT'}
 Points=${form.points}
-Crushable=${form.crushable ? 'yes' : 'no'}${form.cloakable ? '\nCloakable=yes' : ''}${form.sensors ? '\nSensors=yes' : ''}${form.fearless ? '\nFearless=yes' : ''}${form.tiberiumHeal ? '\nTiberiumHeal=yes' : ''}
+Crushable=${form.crushable ? 'yes' : 'no'}${form.cloakable ? '\nCloakable=yes' : ''}${form.sensors ? '\nSensors=yes' : ''}${form.fearless ? '\nFearless=yes' : ''}${form.tiberiumHeal ? '\nTiberiumHeal=yes' : ''}${isVoxel && form.hasTurret ? '\nTurret=yes' : ''}
 VoiceSelect=${form.voiceSelect}
 VoiceMove=${form.voiceMove}
-VoiceAttack=${form.voiceAttack}
+VoiceAttack=${form.voiceAttack}`;
 
+  const artSection = isVoxel
+    ? `
+; ================================================
+; art.ini addition:
+
+[${form.internalName || 'MYUNIT'}]
+Voxel=yes
+Remapable=yes
+Shadow=yes
+Normalized=yes
+Cameo=${cameoId}
+PrimaryFireFLH=${form.primaryFireFLH}
+SecondaryFireFLH=${form.secondaryFireFLH}${form.hasTurret ? '\nTurret=yes\nTurretOffset=' + form.turretOffset : ''}
+`
+    : `
 ; ================================================
 ; art.ini addition:
 
@@ -54,6 +70,8 @@ VoiceAttack=${form.voiceAttack}
 Image=${form.internalName || 'MYUNIT'}
 Cameo=${cameoId}${form.category === 'Infantry' ? '\nSequence=' + form.sequence : ''}
 `;
+
+  return rulesSection + artSection;
 }
 
 export const INIPreview = ({ form }: INIPreviewProps) => {
