@@ -169,4 +169,16 @@
     image-rendering: pixelated;
     image-rendering: crisp-edges;
   }
+
+  /* Flash green animation for auto-filled fields */
+  .animate-flash-green {
+    animation: flash-green 1.5s ease-in-out;
+  }
+}
+
+@keyframes flash-green {
+  0%, 100% { background-color: transparent; }
+  25% { background-color: hsl(160 84% 39% / 0.15); }
+  50% { background-color: hsl(160 84% 39% / 0.25); }
+  75% { background-color: hsl(160 84% 39% / 0.1); }
 }
