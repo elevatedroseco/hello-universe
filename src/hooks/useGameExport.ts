@@ -7,8 +7,11 @@ import { CustomUnit } from '@/types/units';
 import { TiberianSunINIParser } from '@/lib/iniParser';
 import { buildEcacheMix, MixFileEntry } from '@/lib/mixBuilder';
 import { ORIGINAL_GAME_UNITS } from '@/data/gameUnits';
+import { getCachedSkeleton, cacheSkeleton } from '@/lib/skeletonCache';
 
 const SKELETON_URL = 'https://pub-2779116bf9b04734a8ce304c271ce31b.r2.dev/ts_base_skeleton.zip';
+
+export type ExportMode = 'standalone' | 'mod-only' | 'map-mod';
 
 /**
  * Download a file from Supabase storage with bucket/path auto-detection and retry.
@@ -24,7 +27,6 @@ async function downloadFromStorage(filePath: string): Promise<Blob | null> {
 
   let { data, error } = await supabase.storage.from(bucketName).download(cleanPath);
 
-  // Retry with units/ prefix
   if (error && !cleanPath.startsWith('units/')) {
     const retry = await supabase.storage.from(bucketName).download(`units/${cleanPath}`);
     data = retry.data;
@@ -41,17 +43,38 @@ async function downloadFromStorage(filePath: string): Promise<Blob | null> {
 /**
  * Generate installation instructions
  */
-function generateReadme(units: CustomUnit[]): string {
+function generateReadme(units: CustomUnit[], mode: ExportMode): string {
   const shpUnits = units.filter(u => u.renderType !== 'VOXEL');
   const vxlUnits = units.filter(u => u.renderType === 'VOXEL');
+
+  if (mode === 'map-mod') {
+    return `; Map Mod INI Block — paste into FinalSun map editor
+; Generated: ${new Date().toLocaleString()}
+; Units: ${units.length}
+`;
+  }
+
+  const modeLabel = mode === 'mod-only' ? 'MOD FILES ONLY' : 'STANDALONE GAME PACKAGE';
+
   return `==============================================================
-  TIBERIAN SUN CUSTOM MOD — Installation Guide
+  TIBERIAN SUN CUSTOM MOD — ${modeLabel}
 ==============================================================
 
 Generated: ${new Date().toLocaleString()}
 Custom Units: ${units.length} (${shpUnits.length} SHP, ${vxlUnits.length} Voxel)
 
-WHAT'S INCLUDED:
+${mode === 'mod-only' ? `WHAT'S INCLUDED:
+  ✅ rules.ini  — Custom unit definitions (mod additions only)
+  ✅ art.ini    — Custom unit art definitions
+  ✅ ecache99.mix — Custom unit sprites & icons (SHP files)${vxlUnits.length > 0 ? '\n  ✅ expand99.mix — Voxel models (VXL/HVA files)' : ''}
+
+INSTALLATION:
+  1. Copy all files into your Tiberian Sun folder
+     (where Game.exe lives, e.g. C:\\Games\\TibSun\\)
+  2. If you already have rules.ini or art.ini in the root folder,
+     you'll need to MERGE these additions manually.
+  3. Launch the game normally.
+` : `WHAT'S INCLUDED:
   ✅ rules.ini  — MERGED (original game + ${units.length} custom units)
   ✅ art.ini    — MERGED (original game + custom unit art)
   ✅ ecache99.mix — Custom unit sprites & icons (SHP files)${vxlUnits.length > 0 ? '\n  ✅ expand99.mix — Voxel models (VXL/HVA files)' : ''}
@@ -62,31 +85,197 @@ INSTALLATION:
      (where Game.exe lives, e.g. C:\\Games\\TibSun\\)
   2. Overwrite when prompted — original content is preserved inside the files.
   3. Launch the game normally.
-
-HOW IT WORKS:
-  • rules.ini and art.ini in the root folder override the versions
-    inside tibsun.mix / patch.mix (engine priority).
-  • ecache99.mix is scanned automatically by the engine for SHP files.${vxlUnits.length > 0 ? '\n  • expand99.mix is scanned for VXL/HVA voxel models.' : ''}
-  • No original MIX archives are modified.
-
+`}
 CUSTOM UNITS:
 ${units.map((u, i) => `  ${i + 1}. ${u.displayName} (${u.internalName}) — ${u.faction} ${u.category}${u.renderType === 'VOXEL' ? ' [VOXEL]' : ''}, $${u.cost}`).join('\n')}
-
-VERIFICATION:
-  1. rules.ini should be ~500–700 KB
-  2. art.ini   should be ~300–400 KB
-  3. ecache99.mix should exist in the root folder${vxlUnits.length > 0 ? '\n  4. expand99.mix should exist in the root folder' : ''}
-  4. Start skirmish, build prerequisite, see custom units in sidebar.
-
-REVERTING:
-  Delete rules.ini, art.ini, ecache99.mix${vxlUnits.length > 0 ? ', and expand99.mix' : ''} from the root folder.
-  The game falls back to originals inside its MIX archives.
 
 MULTIPLAYER:
   ⚠️  All players need identical rules.ini + ecache99.mix${vxlUnits.length > 0 ? ' + expand99.mix' : ''}.
 
 Created with TibSun Mod Kit — https://tibsunmod.lovable.app
 `;
+}
+
+/**
+ * Generate map mod INI block for FinalSun injection
+ */
+function generateMapModBlock(units: CustomUnit[]): string {
+  const byCategory = units.reduce((acc, u) => {
+    if (!acc[u.category]) acc[u.category] = [];
+    acc[u.category].push(u);
+    return acc;
+  }, {} as Record<string, CustomUnit[]>);
+
+  const categoryToList: Record<string, string> = {
+    Infantry: 'InfantryTypes',
+    Vehicle: 'VehicleTypes',
+    Aircraft: 'AircraftTypes',
+    Structure: 'BuildingTypes',
+  };
+
+  let block = '; ===== TIBSUN MOD KIT — MAP MOD BLOCK =====\n';
+  block += `; Generated: ${new Date().toLocaleString()}\n`;
+  block += `; Units: ${units.length}\n\n`;
+
+  // Type lists
+  for (const [cat, catUnits] of Object.entries(byCategory)) {
+    const listName = categoryToList[cat];
+    if (!listName) continue;
+    block += `; Add to [${listName}]:\n`;
+    block += `; ${catUnits.map(u => u.internalName.toUpperCase()).join(',')}\n\n`;
+  }
+
+  // Unit definitions
+  for (const unit of units) {
+    const rules = (unit.rulesJson || {}) as Record<string, unknown>;
+    const unitName = unit.internalName.toUpperCase();
+    const owner = String(rules.Owner || 'GDI,Nod');
+    const prerequisite = String(rules.Prerequisite || (unit.faction === 'GDI' ? 'GAPILE' : 'NAHAND'));
+
+    block += `[${unitName}]\n`;
+    block += `Name=${unit.displayName}\n`;
+    block += `TechLevel=${rules.TechLevel || unit.techLevel}\n`;
+    block += `Owner=${owner}\n`;
+    block += `Prerequisite=${prerequisite}\n`;
+    block += `Cost=${unit.cost}\n`;
+    block += `Strength=${rules.Strength || unit.strength || 200}\n`;
+    block += `Armor=${rules.Armor || 'light'}\n`;
+    block += `Speed=${rules.Speed || unit.speed || 5}\n`;
+    block += `Sight=${rules.Sight || 5}\n`;
+    block += `Primary=${rules.Primary || 'M1Carbine'}\n`;
+    block += '\n';
+  }
+
+  block += '; ===== END MAP MOD BLOCK =====\n';
+  block += '; Note: Binary assets (SHP/VXL/HVA) must be in ecache99.mix/expand99.mix\n';
+  return block;
+}
+
+/**
+ * Download unit graphics and build MIX entries
+ */
+async function downloadUnitAssets(
+  selectedUnits: CustomUnit[],
+  setExportProgress: (p: number, m: string) => void,
+): Promise<{ shpFiles: MixFileEntry[]; vxlFiles: MixFileEntry[] }> {
+  const shpFiles: MixFileEntry[] = [];
+  const vxlFiles: MixFileEntry[] = [];
+  const perUnit = 25 / selectedUnits.length;
+  let progress = 55;
+
+  for (const unit of selectedUnits) {
+    setExportProgress(Math.floor(progress), `Packaging ${unit.displayName}...`);
+    const isVoxel = unit.renderType === 'VOXEL';
+
+    if (isVoxel) {
+      if (unit.voxelFilePath) {
+        const blob = await downloadFromStorage(unit.voxelFilePath);
+        if (blob) {
+          const name = unit.internalName.substring(0, 8).toUpperCase() + '.VXL';
+          vxlFiles.push({ name, data: await blob.arrayBuffer() });
+        }
+      }
+      if (unit.hvaFilePath) {
+        const blob = await downloadFromStorage(unit.hvaFilePath);
+        if (blob) {
+          const name = unit.internalName.substring(0, 8).toUpperCase() + '.HVA';
+          vxlFiles.push({ name, data: await blob.arrayBuffer() });
+        }
+      }
+      if (unit.turretVxlPath) {
+        const blob = await downloadFromStorage(unit.turretVxlPath);
+        if (blob) {
+          vxlFiles.push({ name: unit.internalName.substring(0, 5).toUpperCase() + 'TUR.VXL', data: await blob.arrayBuffer() });
+        }
+      }
+      if (unit.barrelVxlPath) {
+        const blob = await downloadFromStorage(unit.barrelVxlPath);
+        if (blob) {
+          vxlFiles.push({ name: unit.internalName.substring(0, 4).toUpperCase() + 'BARL.VXL', data: await blob.arrayBuffer() });
+        }
+      }
+    } else {
+      if (unit.shpFilePath) {
+        const blob = await downloadFromStorage(unit.shpFilePath);
+        if (blob) {
+          shpFiles.push({ name: unit.internalName.substring(0, 8).toUpperCase() + '.SHP', data: await blob.arrayBuffer() });
+        }
+      }
+    }
+
+    if (unit.icon_file_path) {
+      const blob = await downloadFromStorage(unit.icon_file_path);
+      if (blob) {
+        shpFiles.push({ name: (unit.internalName.substring(0, 4) + 'ICON').toUpperCase() + '.SHP', data: await blob.arrayBuffer() });
+      }
+    }
+
+    progress += perUnit;
+  }
+
+  return { shpFiles, vxlFiles };
+}
+
+/**
+ * Generate mod-only rules/art INI (without merging into base game files)
+ */
+function generateModOnlyINI(selectedUnits: CustomUnit[]): { rules: string; art: string } {
+  // Build a fresh rules.ini with only custom content
+  const fakeBase = TiberianSunINIParser.parse('');
+  const withLists = TiberianSunINIParser.injectUnits(fakeBase, selectedUnits);
+  const withDefs = TiberianSunINIParser.addUnitDefinitions(withLists, selectedUnits);
+
+  let rules = '; Tiberian Sun Mod Kit — Mod-only rules.ini additions\n';
+  rules += `; Generated: ${new Date().toISOString()}\n`;
+  rules += `; Units: ${selectedUnits.length}\n\n`;
+
+  // Type lists
+  const categoryToList: Record<string, string> = {
+    Infantry: 'InfantryTypes', Vehicle: 'VehicleTypes',
+    Aircraft: 'AircraftTypes', Structure: 'BuildingTypes',
+  };
+  const byCategory = selectedUnits.reduce((acc, u) => {
+    if (!acc[u.category]) acc[u.category] = [];
+    acc[u.category].push(u);
+    return acc;
+  }, {} as Record<string, CustomUnit[]>);
+
+  for (const [cat, units] of Object.entries(byCategory)) {
+    const listName = categoryToList[cat];
+    if (!listName) continue;
+    rules += `; Append to [${listName}]:\n`;
+    units.forEach((u, i) => { rules += `XX${i}=${u.internalName.toUpperCase()}\n`; });
+    rules += '\n';
+  }
+
+  // Unit definitions
+  for (const unitName of Object.keys(withDefs.data)) {
+    if (['InfantryTypes', 'VehicleTypes', 'AircraftTypes', 'BuildingTypes'].includes(unitName)) continue;
+    const section = withDefs.data[unitName];
+    rules += `[${unitName}]\n`;
+    for (const [k, v] of Object.entries(section)) {
+      rules += `${k}=${v}\n`;
+    }
+    rules += '\n';
+  }
+
+  // Art definitions
+  const artResult = TiberianSunINIParser.parse('');
+  const withArt = TiberianSunINIParser.addArtDefinitions(artResult, selectedUnits);
+
+  let art = '; Tiberian Sun Mod Kit — Mod-only art.ini additions\n';
+  art += `; Generated: ${new Date().toISOString()}\n\n`;
+
+  for (const sectionName of Object.keys(withArt.data)) {
+    const section = withArt.data[sectionName];
+    art += `[${sectionName}]\n`;
+    for (const [k, v] of Object.entries(section)) {
+      art += `${k}=${v}\n`;
+    }
+    art += '\n';
+  }
+
+  return { rules, art };
 }
 
 export const useGameExport = (customUnits: CustomUnit[]) => {
@@ -97,7 +286,7 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
     resetExport
   } = useUnitSelection();
 
-  const exportGame = useCallback(async () => {
+  const exportGame = useCallback(async (mode: ExportMode = 'standalone') => {
     if (selectedUnitIds.size === 0) return;
 
     const selectedUnits = customUnits.filter(u => selectedUnitIds.has(u.id));
@@ -106,8 +295,8 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
     try {
       setExporting(true);
 
-      // ── FIX 3: Check for name collisions with base game ───
-      const conflicts = selectedUnits.filter(u => 
+      // Check for name collisions with base game
+      const conflicts = selectedUnits.filter(u =>
         ORIGINAL_GAME_UNITS.has(u.internalName.toUpperCase())
       );
       if (conflicts.length > 0) {
@@ -117,155 +306,128 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
         );
       }
 
-      // ── A: Fetch skeleton ─────────────────────────────────
-      setExportProgress(5, 'Connecting to R2...');
-      const response = await fetch(SKELETON_URL, { mode: 'cors' });
-      if (!response.ok) throw new Error(`Skeleton fetch failed: ${response.statusText}`);
+      // ── MAP-MOD MODE ──────────────────────────────────────
+      if (mode === 'map-mod') {
+        setExportProgress(50, 'Generating map mod block...');
+        const block = generateMapModBlock(selectedUnits);
+        const blob = new Blob([block], { type: 'text/plain' });
+        const date = new Date().toISOString().split('T')[0];
+        saveAs(blob, `TibSun_MapMod_${date}.txt`);
+        setExportProgress(100, 'Done!');
+        setTimeout(() => resetExport(), 2000);
+        return;
+      }
 
-      setExportProgress(15, 'Downloading base game (~200MB)...');
-      const skeletonBlob = await response.blob();
-      console.log(`📦 Skeleton: ${(skeletonBlob.size / 1024 / 1024).toFixed(1)} MB`);
+      // ── MOD-ONLY MODE ─────────────────────────────────────
+      if (mode === 'mod-only') {
+        setExportProgress(10, 'Generating mod files...');
+        const { rules, art } = generateModOnlyINI(selectedUnits);
 
-      // ── B: Load ZIP ───────────────────────────────────────
+        setExportProgress(40, 'Downloading unit graphics...');
+        const { shpFiles, vxlFiles } = await downloadUnitAssets(selectedUnits, setExportProgress);
+
+        setExportProgress(75, 'Building package...');
+        const zip = new JSZip();
+        zip.file('rules.ini', rules);
+        zip.file('art.ini', art);
+
+        if (shpFiles.length > 0) {
+          zip.file('ecache99.mix', buildEcacheMix(shpFiles));
+        }
+        if (vxlFiles.length > 0) {
+          zip.file('expand99.mix', buildEcacheMix(vxlFiles));
+        }
+        zip.file('MOD_README.txt', generateReadme(selectedUnits, 'mod-only'));
+
+        setExportProgress(85, 'Compressing...');
+        const blob = await zip.generateAsync(
+          { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+          (meta) => setExportProgress(85 + Math.floor(meta.percent * 0.12), 'Compressing...')
+        );
+
+        const date = new Date().toISOString().split('T')[0];
+        saveAs(blob, `TibSun_ModFiles_${date}.zip`);
+        setExportProgress(100, 'Done!');
+        setTimeout(() => resetExport(), 2000);
+        return;
+      }
+
+      // ── STANDALONE MODE (with caching) ────────────────────
+      setExportProgress(5, 'Checking cache...');
+      let skeletonBlob = await getCachedSkeleton();
+
+      if (!skeletonBlob) {
+        setExportProgress(8, 'Downloading base game (~200MB)...');
+        const response = await fetch(SKELETON_URL, { mode: 'cors' });
+        if (!response.ok) throw new Error(`Skeleton fetch failed: ${response.statusText}`);
+        setExportProgress(15, 'Downloading base game (~200MB)...');
+        skeletonBlob = await response.blob();
+        console.log(`📦 Skeleton: ${(skeletonBlob.size / 1024 / 1024).toFixed(1)} MB`);
+
+        // Cache for next time
+        setExportProgress(22, 'Caching skeleton for future exports...');
+        await cacheSkeleton(skeletonBlob);
+      } else {
+        setExportProgress(22, 'Using cached skeleton ✓');
+      }
+
+      // Load ZIP
       setExportProgress(25, 'Unpacking skeleton...');
       const zip = await JSZip.loadAsync(skeletonBlob);
 
-      // ── C: Read INI files ─────────────────────────────────
+      // Find game root
       setExportProgress(30, 'Reading game configuration...');
-
-      // FIX 2: Find Game.exe to determine the game root
       const gameExeMatch = zip.file(/Game\.exe$/i);
       let gameRoot = '';
       if (gameExeMatch.length > 0) {
         const exePath = gameExeMatch[0].name;
         gameRoot = exePath.substring(0, exePath.lastIndexOf('/') + 1);
       }
-      console.log(`📁 Game root: "${gameRoot || '(zip root)'}"`);
 
       const rulesMatches = zip.file(/rules\.ini$/i);
       const artMatches = zip.file(/art\.ini$/i);
       if (rulesMatches.length === 0) throw new Error('Skeleton missing rules.ini');
       if (artMatches.length === 0) throw new Error('Skeleton missing art.ini');
 
-      const rulesFile = rulesMatches[0];
-      const artFile = artMatches[0];
+      const originalRules = await rulesMatches[0].async('string');
+      const originalArt = await artMatches[0].async('string');
 
-      const originalRules = await rulesFile.async('string');
-      const originalArt = await artFile.async('string');
-      console.log(`📄 rules.ini: ${(originalRules.length / 1024).toFixed(0)} KB, art.ini: ${(originalArt.length / 1024).toFixed(0)} KB`);
-
-      // ── D: Parse + inject rules ───────────────────────────
+      // Parse + inject rules
       setExportProgress(40, 'Merging unit definitions...');
       const rulesData = TiberianSunINIParser.parse(originalRules);
       const withLists = TiberianSunINIParser.injectUnits(rulesData, selectedUnits);
       const withDefs = TiberianSunINIParser.addUnitDefinitions(withLists, selectedUnits);
       const finalRules = TiberianSunINIParser.stringify(withDefs);
 
-      // ── E: Parse + inject art ─────────────────────────────
+      // Parse + inject art
       setExportProgress(50, 'Merging art definitions...');
       const artData = TiberianSunINIParser.parse(originalArt);
       const withArtDefs = TiberianSunINIParser.addArtDefinitions(artData, selectedUnits);
       const finalArt = TiberianSunINIParser.stringify(withArtDefs);
 
-      // FIX 2: Write ALL output files at gameRoot (same level as Game.exe)
       zip.file(`${gameRoot}rules.ini`, finalRules);
       zip.file(`${gameRoot}art.ini`, finalArt);
-      console.log(`✅ Wrote merged rules.ini (${(finalRules.length / 1024).toFixed(0)} KB) and art.ini (${(finalArt.length / 1024).toFixed(0)} KB)`);
 
-      // ── F: Download SHP + VXL/HVA files ──────────────────
+      // Download assets
       setExportProgress(55, 'Downloading unit graphics...');
-      const shpFiles: MixFileEntry[] = [];
-      const vxlFiles: MixFileEntry[] = [];
-      const perUnit = 25 / selectedUnits.length;
-      let shpProgress = 55;
+      const { shpFiles, vxlFiles } = await downloadUnitAssets(selectedUnits, setExportProgress);
 
-      for (const unit of selectedUnits) {
-        setExportProgress(Math.floor(shpProgress), `Packaging ${unit.displayName}...`);
-        const isVoxel = unit.renderType === 'VOXEL';
-
-        if (isVoxel) {
-          // Download VXL
-          if (unit.voxelFilePath) {
-            const blob = await downloadFromStorage(unit.voxelFilePath);
-            if (blob) {
-              const name = unit.internalName.substring(0, 8).toUpperCase() + '.VXL';
-              vxlFiles.push({ name, data: await blob.arrayBuffer() });
-              console.log(`✅ VXL: ${name}`);
-            }
-          }
-          // Download HVA
-          if (unit.hvaFilePath) {
-            const blob = await downloadFromStorage(unit.hvaFilePath);
-            if (blob) {
-              const name = unit.internalName.substring(0, 8).toUpperCase() + '.HVA';
-              vxlFiles.push({ name, data: await blob.arrayBuffer() });
-              console.log(`✅ HVA: ${name}`);
-            }
-          }
-          // Download turret VXL
-          if (unit.turretVxlPath) {
-            const blob = await downloadFromStorage(unit.turretVxlPath);
-            if (blob) {
-              const name = unit.internalName.substring(0, 5).toUpperCase() + 'TUR.VXL';
-              vxlFiles.push({ name, data: await blob.arrayBuffer() });
-              console.log(`✅ Turret VXL: ${name}`);
-            }
-          }
-          // Download barrel VXL
-          if (unit.barrelVxlPath) {
-            const blob = await downloadFromStorage(unit.barrelVxlPath);
-            if (blob) {
-              const name = unit.internalName.substring(0, 4).toUpperCase() + 'BARL.VXL';
-              vxlFiles.push({ name, data: await blob.arrayBuffer() });
-              console.log(`✅ Barrel VXL: ${name}`);
-            }
-          }
-        } else {
-          // Main SHP sprite
-          if (unit.shpFilePath) {
-            const blob = await downloadFromStorage(unit.shpFilePath);
-            if (blob) {
-              const name = unit.internalName.substring(0, 8).toUpperCase() + '.SHP';
-              shpFiles.push({ name, data: await blob.arrayBuffer() });
-              console.log(`✅ SHP: ${name}`);
-            }
-          }
-        }
-
-        // Icon / cameo (always SHP)
-        if (unit.icon_file_path) {
-          const blob = await downloadFromStorage(unit.icon_file_path);
-          if (blob) {
-            const iconName = (unit.internalName.substring(0, 4) + 'ICON').toUpperCase() + '.SHP';
-            shpFiles.push({ name: iconName, data: await blob.arrayBuffer() });
-            console.log(`✅ Icon: ${iconName}`);
-          }
-        }
-
-        shpProgress += perUnit;
-      }
-
-      // ── G: Build ecache99.mix (SHPs) at game root ────────
+      // Build MIX files
       if (shpFiles.length > 0) {
         setExportProgress(80, `Building ecache99.mix (${shpFiles.length} sprites)...`);
         const mixData = buildEcacheMix(shpFiles);
         zip.file(`${gameRoot}ecache99.mix`, mixData);
-        console.log(`✅ ecache99.mix: ${(mixData.byteLength / 1024).toFixed(0)} KB, ${shpFiles.length} files`);
       }
-
-      // ── G2: Build expand99.mix (VXL/HVA) at game root ────
       if (vxlFiles.length > 0) {
         setExportProgress(83, `Building expand99.mix (${vxlFiles.length} voxel files)...`);
-        const vxlMixData = buildEcacheMix(vxlFiles);
-        zip.file(`${gameRoot}expand99.mix`, vxlMixData);
-        console.log(`✅ expand99.mix: ${(vxlMixData.byteLength / 1024).toFixed(0)} KB, ${vxlFiles.length} files`);
+        zip.file(`${gameRoot}expand99.mix`, buildEcacheMix(vxlFiles));
       }
 
-      // ── H: README ─────────────────────────────────────────
+      // README
       setExportProgress(88, 'Writing installation guide...');
-      zip.file(`${gameRoot}MOD_README.txt`, generateReadme(selectedUnits));
+      zip.file(`${gameRoot}MOD_README.txt`, generateReadme(selectedUnits, 'standalone'));
 
-      // ── I: Compress + download ────────────────────────────
+      // Compress + download
       setExportProgress(90, 'Compressing final package...');
       const finalBlob = await zip.generateAsync(
         { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
