@@ -1,9 +1,14 @@
+export type RenderType = 'SHP' | 'VOXEL';
+
 export interface UnitForm {
   // Identity
   internalName: string;
   displayName: string;
   faction: 'GDI' | 'Nod' | 'Mutant';
   category: 'Infantry' | 'Vehicle' | 'Aircraft';
+
+  // Render type
+  renderType: RenderType;
 
   // General
   techLevel: number;
@@ -34,6 +39,13 @@ export interface UnitForm {
   // Art
   sequence: string;
 
+  // Voxel-specific
+  primaryFireFLH: string;
+  secondaryFireFLH: string;
+  hasTurret: boolean;
+  hasBarrel: boolean;
+  turretOffset: number;
+
   // Voice
   voicePreset: string;
   voiceSelect: string;
@@ -44,6 +56,10 @@ export interface UnitForm {
   // Files
   spriteFile: File | null;
   iconFile: File | null;
+  vxlFile: File | null;
+  hvaFile: File | null;
+  turretVxlFile: File | null;
+  barrelVxlFile: File | null;
 }
 
 export const DEFAULT_FORM: UnitForm = {
@@ -51,6 +67,7 @@ export const DEFAULT_FORM: UnitForm = {
   displayName: '',
   faction: 'GDI',
   category: 'Infantry',
+  renderType: 'SHP',
   techLevel: 1,
   cost: 300,
   points: 3,
@@ -72,6 +89,11 @@ export const DEFAULT_FORM: UnitForm = {
   fearless: false,
   tiberiumHeal: false,
   sequence: 'InfantrySequence',
+  primaryFireFLH: '0,0,100',
+  secondaryFireFLH: '0,0,100',
+  hasTurret: false,
+  hasBarrel: false,
+  turretOffset: 0,
   voicePreset: 'GDI_standard',
   voiceSelect: '15-I000,15-I004',
   voiceMove: '15-I006,15-I010',
@@ -79,4 +101,8 @@ export const DEFAULT_FORM: UnitForm = {
   voiceFeedback: '15-I058',
   spriteFile: null,
   iconFile: null,
+  vxlFile: null,
+  hvaFile: null,
+  turretVxlFile: null,
+  barrelVxlFile: null,
 };

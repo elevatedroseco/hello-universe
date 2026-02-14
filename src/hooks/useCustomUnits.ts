@@ -30,7 +30,6 @@ const capitalize = (str: string): string =>
 const transformToCustomUnit = (row: Record<string, unknown>): CustomUnit => {
   const rules = (row.rules_json as Record<string, unknown>) || {};
   
-  // Extract values from rules_json (where they're actually stored)
   const rawCategory = (rules.Category as string) || (rules.category as string) || 'Infantry';
   const rawFaction = (rules.Owner as string) || (rules.owner as string) || 'GDI';
   
@@ -45,8 +44,12 @@ const transformToCustomUnit = (row: Record<string, unknown>): CustomUnit => {
     strength: (rules.Strength as number) || (rules.strength as number) || 0,
     speed: (rules.Speed as number) || (rules.speed as number) || 0,
     techLevel: (rules.TechLevel as number) || (rules.techLevel as number) || 1,
+    renderType: (row.render_type as string as any) || 'SHP',
     shpFilePath: row.shp_file_path as string | undefined,
-    voxelFilePath: row.voxel_file_path as string | undefined,
+    voxelFilePath: row.vxl_file_path as string | undefined,
+    hvaFilePath: row.hva_file_path as string | undefined,
+    turretVxlPath: row.turret_vxl_path as string | undefined,
+    barrelVxlPath: row.barrel_vxl_path as string | undefined,
     cameoFilePath: row.cameo_file_path as string | undefined,
     previewImageUrl: row.preview_image_url as string | undefined,
     rulesJson: rules,
