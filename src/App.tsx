@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import AdminForge from "./pages/AdminForge";
 import ValidationCenter from "./pages/ValidationCenter";
 import WeaponEditor from "./pages/WeaponEditor";
+import ImageGenerator from "./pages/ImageGenerator";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,6 +23,7 @@ const App = () => (
           <Route path="/admin" element={<AdminForge />} />
           <Route path="/validate" element={<ValidationCenter />} />
           <Route path="/weapons" element={<WeaponEditor />} />
+          <Route path="/images" element={<ImageGenerator />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

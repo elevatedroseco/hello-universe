@@ -1,7 +1,7 @@
 import { useUnitSelection } from '@/store/useUnitSelection';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Plus, Hammer, Wifi, WifiOff, ShieldCheck, Crosshair } from 'lucide-react';
+import { Plus, Hammer, Wifi, WifiOff, ShieldCheck, Crosshair, ImageIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { isSupabaseConfigured } from '@/integrations/supabase/client';
 
@@ -61,6 +61,12 @@ export const Header = () => {
               <Link to="/validate">
                 <ShieldCheck className="w-4 h-4 mr-1.5" />
                 <span className="hidden sm:inline">Validate</span>
+              </Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild className="font-display text-xs text-muted-foreground hover:text-foreground">
+              <Link to="/images">
+                <ImageIcon className="w-4 h-4 mr-1.5" />
+                <span className="hidden sm:inline">Images</span>
               </Link>
             </Button>
             <Button
