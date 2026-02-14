@@ -20,6 +20,7 @@ import { UnitForm, DEFAULT_FORM } from '@/components/admin/types';
 import { TS_LOCOMOTORS } from '@/data/tsWeapons';
 import { ORIGINAL_GAME_UNITS } from '@/data/gameUnits';
 import { RenameUnitDialog } from '@/components/admin/RenameUnitDialog';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface ForgeUnit {
   id: string;
@@ -36,7 +37,7 @@ const AdminForge = () => {
   const [renamingUnit, setRenamingUnit] = useState<ForgeUnit | null>(null);
   const [listSearch, setListSearch] = useState('');
 
-  const { data: forgeUnits = [] } = useQuery({
+  const { data: forgeUnits = [], isLoading: forgeLoading } = useQuery({
     queryKey: ['forge-units'],
     queryFn: async () => {
       const client = requireSupabase();
@@ -347,7 +348,16 @@ const AdminForge = () => {
               </div>
             )}
           </div>
-          {filteredForgeUnits.length > 0 ? (
+          {forgeLoading ? (
+            <div className="divide-y divide-border">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="px-3 py-2.5 space-y-1.5">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-3 w-32" />
+                </div>
+              ))}
+            </div>
+          ) : filteredForgeUnits.length > 0 ? (
             <div className="divide-y divide-border">
               {filteredForgeUnits.map((unit) => (
                 <div key={unit.id} className="flex items-center justify-between px-3 py-2.5 group hover:bg-secondary/50 transition-colors">
