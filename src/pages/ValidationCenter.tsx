@@ -1,7 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCustomUnits } from '@/hooks/useCustomUnits';
 import { runValidation, ValidationIssue } from '@/lib/validation';
+import { CustomUnit } from '@/types/units';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,18 +42,20 @@ const SEVERITY_VARIANT: Record<string, string> = {
 
 const ValidationCenter = () => {
   const { customUnits, isLoading } = useCustomUnits();
+  const queryClient = useQueryClient();
   const [results, setResults] = useState<ValidationIssue[] | null>(null);
   const [fixing, setFixing] = useState<string | null>(null);
 
-  const handleRunValidation = () => {
-    const issues = runValidation(customUnits);
+  const handleRunValidation = useCallback((units?: CustomUnit[]) => {
+    const unitsToValidate = units || customUnits;
+    const issues = runValidation(unitsToValidate);
     setResults(issues);
     if (issues.length === 0) {
       toast.success('All units passed validation!');
     } else {
-      toast.warning(`Found ${issues.length} issue(s) across ${customUnits.length} units.`);
+      toast.warning(`Found ${issues.length} issue(s) across ${unitsToValidate.length} units.`);
     }
-  };
+  }, [customUnits]);
 
   const errorCount = results?.filter((r) => r.severity === 'error').length ?? 0;
   const warningCount = results?.filter((r) => r.severity === 'warning').length ?? 0;
@@ -85,8 +89,13 @@ const ValidationCenter = () => {
       }
 
       toast.success(`Auto-fix applied to ${issue.unitName}`);
-      // Re-run validation
-      setTimeout(handleRunValidation, 500);
+      // Invalidate cache and re-run after refetch
+      await queryClient.invalidateQueries({ queryKey: ['custom-units'] });
+      // Small delay to let React Query refetch
+      setTimeout(() => {
+        const freshUnits = queryClient.getQueryData<CustomUnit[]>(['custom-units']);
+        if (freshUnits) handleRunValidation(freshUnits);
+      }, 800);
     } catch (err) {
       toast.error(`Fix failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
@@ -157,7 +166,7 @@ const ValidationCenter = () => {
         {/* Run Button */}
         <div className="flex items-center gap-4">
           <Button
-            onClick={handleRunValidation}
+            onClick={() => handleRunValidation()}
             disabled={isLoading || customUnits.length === 0}
             size="lg"
             className="bg-primary hover:bg-primary/90 font-display"
