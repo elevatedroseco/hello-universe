@@ -5,7 +5,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Badge } from '@/components/ui/badge';
 import { TS_PREREQUISITES } from '@/data/tsWeapons';
 import { cn } from '@/lib/utils';
-import { User, Truck, Plane } from 'lucide-react';
+import { User, Truck, Plane, Building2 } from 'lucide-react';
 import type { UnitForm } from '../types';
 
 interface TabGeneralProps {
@@ -23,6 +23,7 @@ const CATEGORY_ICONS = {
   Infantry: User,
   Vehicle: Truck,
   Aircraft: Plane,
+  Structure: Building2,
 } as const;
 
 const TECH_LABELS: Record<number, string> = {
@@ -57,8 +58,8 @@ export const TabGeneral = ({ form, setForm }: TabGeneralProps) => {
 
   const handleCategoryChange = (category: string) => {
     const cat = category as UnitForm['category'];
-    const defaultLocos: Record<string, string> = { Infantry: 'Foot', Vehicle: 'Drive', Aircraft: 'Fly' };
-    const defaultArmor: Record<string, string> = { Infantry: 'none', Vehicle: 'light', Aircraft: 'light' };
+    const defaultLocos: Record<string, string> = { Infantry: 'Foot', Vehicle: 'Drive', Aircraft: 'Fly', Structure: 'Foot' };
+    const defaultArmor: Record<string, string> = { Infantry: 'none', Vehicle: 'light', Aircraft: 'light', Structure: 'concrete' };
     setForm((prev) => ({
       ...prev,
       category: cat,
@@ -66,7 +67,9 @@ export const TabGeneral = ({ form, setForm }: TabGeneralProps) => {
       armor: defaultArmor[cat] || 'none',
       crushable: cat === 'Infantry',
       crusher: false,
+      speed: cat === 'Structure' ? 0 : prev.speed,
       sequence: cat === 'Infantry' ? 'InfantrySequence' : 'N/A',
+      renderType: cat === 'Structure' ? 'SHP' : prev.renderType,
     }));
   };
 
@@ -141,7 +144,7 @@ export const TabGeneral = ({ form, setForm }: TabGeneralProps) => {
           onValueChange={handleCategoryChange}
           className="flex gap-2"
         >
-          {(['Infantry', 'Vehicle', 'Aircraft'] as const).map((cat) => {
+          {(['Infantry', 'Vehicle', 'Aircraft', 'Structure'] as const).map((cat) => {
             const Icon = CATEGORY_ICONS[cat];
             return (
               <div key={cat} className="flex items-center">
