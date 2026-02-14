@@ -10,9 +10,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
 import { TS_WEAPONS, TS_WARHEADS, TS_ARMOR_TYPES, WEAPON_WARHEAD_MAP } from '@/data/tsWeapons';
-import { Heart, Shield, Crosshair, Zap } from 'lucide-react';
+import { Heart, Shield, Crosshair, Zap, Wrench } from 'lucide-react';
 import type { UnitForm } from '../types';
+import type { CustomWeapon, CustomWarhead } from '@/pages/WeaponEditor';
 
 interface TabCombatProps {
   form: UnitForm;
@@ -39,8 +41,21 @@ const getRofLabel = (v: number) => {
   return 'Slow';
 };
 
+function loadCustomWeapons(): CustomWeapon[] {
+  try { return JSON.parse(localStorage.getItem('ts_custom_weapons') || '[]'); }
+  catch { return []; }
+}
+
+function loadCustomWarheads(): CustomWarhead[] {
+  try { return JSON.parse(localStorage.getItem('ts_custom_warheads') || '[]'); }
+  catch { return []; }
+}
+
 export const TabCombat = ({ form, setForm }: TabCombatProps) => {
   const [weaponSearch, setWeaponSearch] = useState('');
+
+  const customWeapons = useMemo(() => loadCustomWeapons(), []);
+  const customWarheads = useMemo(() => loadCustomWarheads(), []);
 
   const updateField = <K extends keyof UnitForm>(field: K, value: UnitForm[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -58,6 +73,14 @@ export const TabCombat = ({ form, setForm }: TabCombatProps) => {
       (w) => w.label.toLowerCase().includes(q) || w.id.toLowerCase().includes(q)
     );
   }, [weaponOptions, weaponSearch]);
+
+  const filteredCustomWeapons = useMemo(() => {
+    if (!weaponSearch) return customWeapons;
+    const q = weaponSearch.toLowerCase();
+    return customWeapons.filter(
+      (w) => w.name.toLowerCase().includes(q) || w.weaponId.toLowerCase().includes(q)
+    );
+  }, [customWeapons, weaponSearch]);
 
   const handleWeaponChange = (weaponId: string) => {
     updateField('primaryWeapon', weaponId);
@@ -96,6 +119,25 @@ export const TabCombat = ({ form, setForm }: TabCombatProps) => {
                 </span>
               </SelectItem>
             ))}
+            {filteredCustomWeapons.length > 0 && (
+              <>
+                <Separator className="my-1" />
+                <div className="px-2 py-1">
+                  <span className="text-xs text-muted-foreground font-display flex items-center gap-1">
+                    <Wrench className="w-3 h-3" /> CUSTOM WEAPONS
+                  </span>
+                </div>
+                {filteredCustomWeapons.map((w) => (
+                  <SelectItem key={`custom-${w.id}`} value={w.weaponId}>
+                    <span className="flex items-center gap-2">
+                      <span className="font-medium">{w.name}</span>
+                      <Badge variant="outline" className="text-primary border-primary/50 text-xs">{w.damage}</Badge>
+                      <span className="text-xs text-muted-foreground">Custom</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </>
+            )}
           </SelectContent>
         </Select>
       </div>
@@ -103,7 +145,7 @@ export const TabCombat = ({ form, setForm }: TabCombatProps) => {
       {/* Elite Weapon */}
       <div className="space-y-2">
         <Label className="text-sm font-display flex items-center gap-1">
-          <Zap className="w-4 h-4 text-yellow-400" />
+          <Zap className="w-4 h-4 text-accent-foreground" />
           Elite Weapon
         </Label>
         <Select value={form.eliteWeapon || 'None'} onValueChange={(v) => updateField('eliteWeapon', v === 'None' ? '' : v)}>
@@ -120,6 +162,24 @@ export const TabCombat = ({ form, setForm }: TabCombatProps) => {
                 </span>
               </SelectItem>
             ))}
+            {customWeapons.length > 0 && (
+              <>
+                <Separator className="my-1" />
+                <div className="px-2 py-1">
+                  <span className="text-xs text-muted-foreground font-display flex items-center gap-1">
+                    <Wrench className="w-3 h-3" /> CUSTOM WEAPONS
+                  </span>
+                </div>
+                {customWeapons.map((w) => (
+                  <SelectItem key={`custom-${w.id}`} value={w.weaponId}>
+                    <span className="flex items-center gap-2">
+                      <span className="font-medium">{w.name}</span>
+                      <Badge variant="outline" className="text-primary border-primary/50 text-xs">{w.damage}</Badge>
+                    </span>
+                  </SelectItem>
+                ))}
+              </>
+            )}
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">Weapon unlocked at Elite veterancy. Leave blank to keep Primary.</p>
@@ -141,6 +201,24 @@ export const TabCombat = ({ form, setForm }: TabCombatProps) => {
                 </span>
               </SelectItem>
             ))}
+            {customWarheads.length > 0 && (
+              <>
+                <Separator className="my-1" />
+                <div className="px-2 py-1">
+                  <span className="text-xs text-muted-foreground font-display flex items-center gap-1">
+                    <Wrench className="w-3 h-3" /> CUSTOM WARHEADS
+                  </span>
+                </div>
+                {customWarheads.map((wh) => (
+                  <SelectItem key={`custom-${wh.id}`} value={wh.warheadId}>
+                    <span className="flex flex-col">
+                      <span className="font-medium">{wh.name}</span>
+                      <span className="text-xs text-muted-foreground">Verses: {wh.verses}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </>
+            )}
           </SelectContent>
         </Select>
       </div>
