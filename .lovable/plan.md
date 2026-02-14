@@ -1,156 +1,123 @@
 
 
-# UI Revamp -- Phase 1 Quick Wins + Phase 2 Structural Improvements
+# Fix: Game Crash on Spawn / Invisible Units with TS Client 7.06
 
-This plan implements the 5 recommended first deliverables from the UX audit, organized into two batches of changes.
+## Problem Summary
 
-## Summary of Changes
-
-1. **Shared SegmentedControl component** replacing FactionTabs and CategoryTabs
-2. **Sticky app bar with status chips** + sticky export rail
-3. **Search + sort controls** for unit browsing
-4. **Tabbed Default/Custom workspace** with richer empty states
-5. **Admin Forge split layout** and extracted RenameUnitDialog
+Three critical bugs in the export pipeline cause the game to crash or show no custom units when using TS Client 7.06.
 
 ---
 
-## Deliverable 1: Shared SegmentedControl Component
+## Bug 1: MIX File Format is Wrong (Crash on Spawn)
 
-Create `src/components/ui/segmented-control.tsx` -- a reusable component that both faction and category selectors will use.
+**File:** `src/lib/mixBuilder.ts`
 
-**Props:**
-- `items: Array<{ id: string; label: string; icon?: LucideIcon; color?: string }>`
-- `value: string`
-- `onChange: (id: string) => void`
-- `size?: 'sm' | 'md'`
+The current MIX builder uses the **C&C1/Red Alert 1 format** (no flags prefix). Tiberian Sun uses an **updated format** that starts with a 4-byte flags field.
 
-**Behavior:**
-- Renders a pill-shaped container with clickable segments
-- Active segment gets a filled background (supports custom faction colors via a `color` prop)
-- Keyboard accessible with focus-visible ring
-- Icon + label layout (icon only on mobile via responsive classes)
+**Current (broken):**
+```text
+[2 bytes] file count
+[4 bytes] data size
+[index...]
+[data...]
+```
 
-**Refactor FactionTabs and CategoryTabs:**
-- Replace both with thin wrappers around SegmentedControl
-- FactionTabs passes faction color classes; CategoryTabs passes Lucide icons
-- Delete the duplicated button styling logic from both components
+**Required for TS:**
+```text
+[4 bytes] flags (0x00000000 = no encryption, no checksum)
+[2 bytes] file count
+[4 bytes] data size
+[index...]
+[data...]
+```
 
----
+The game reads the first 2 bytes and sees a non-zero value (the file count), which tells it to interpret the archive as old-format. The rest of the data is then completely misaligned, causing a crash when it tries to load sprites.
 
-## Deliverable 2: Sticky Header + Sticky Export Rail
-
-### Header changes (`src/components/Header.tsx`)
-- Add `sticky top-0 z-40` positioning
-- Add compact status chips:
-  - Selected count (gold badge, already exists -- keep)
-  - Active faction/category as small text chips
-  - Backend connection indicator (green dot = connected, red dot = disconnected, based on `isSupabaseConfigured`)
-- Add "Unit Forge" link button (links to `/admin`) and "Create Unit" CTA button (opens the drawer)
-- Remove the FloatingActionButton component since the CTA moves to the header
-
-### Export rail changes (`src/components/ExportSection.tsx`)
-- Add `sticky bottom-0 z-40` positioning
-- Condense into a single horizontal bar:
-  - Left: selected count + "N units selected" text
-  - Center: readiness checks as small icon badges (backend connected, units selected, SHPs present)
-  - Right: export button with shorter label "Export Mod Package" instead of "DOWNLOAD MODDED GAME (~200MB)"
-- Collapse to zero height when nothing is selected (slide-down animation on first selection)
-
-### Remove FloatingActionButton
-- Delete `src/components/FloatingActionButton.tsx`
-- Remove from `Index.tsx` imports
+**Fix:** Add a 4-byte `0x00000000` prefix to the MIX output. Change `headerSize` from 6 to 10.
 
 ---
 
-## Deliverable 3: Search + Sort Controls
+## Bug 2: Wrong Hash Algorithm (Files Not Found in MIX)
 
-### Add to Zustand store (`src/store/useUnitSelection.ts`)
-New state fields:
-- `searchQuery: string` + `setSearchQuery`
-- `sortBy: 'techLevel' | 'cost' | 'strength' | 'name'` + `setSortBy`
+**File:** `src/lib/mixBuilder.ts`
 
-### Create FilterBar component (`src/components/FilterBar.tsx`)
-Placed between the segmented controls row and the content area in Index.tsx.
+The current `mixHash()` function uses a "rotate-left-1 + add" algorithm. This is the hash from **C&C1/Red Alert 1**. Tiberian Sun switched to **CRC32** for filename lookups (per ModdingWiki: "It was replaced with the less collision-prone CRC32 in Tiberian Sun and later games").
 
-**Contents:**
-- Search input (magnifying glass icon, placeholder "Search units...", filters by `internalName` and `displayName`)
-- Sort dropdown: Tech Level (default), Cost, Strength, Name
-- Unit count label: "12 units" (updates with filters)
+When the game looks up `ZOMBIE.SHP` inside ecache99.mix, it computes a CRC32 hash and searches the index. Since the index was built with the wrong hash, no match is found, and the sprite is missing.
 
-### Wire into UnitGrid
-- `filteredDefaultUnits` and `filteredCustomUnits` memos apply search and sort from store
-- Show "No results for [query]" empty state with clear button when search eliminates all
+**Fix:** Replace `mixHash()` with a standard CRC32 implementation (polynomial `0xEDB88320`). This can be done inline with a lookup table (~50 lines, no new dependency).
 
 ---
 
-## Deliverable 4: Tabbed Default/Custom Workspace
+## Bug 3: File Placement Mismatches TS Client 7.06 Folder Structure (Units Not Registered)
 
-### Replace stacked layout in UnitGrid with tabs
-Currently the grid renders "DEFAULT UNITS" section then "CUSTOM UNITS" section stacked vertically. Change to:
+**File:** `src/hooks/useGameExport.ts`
 
-- Use Shadcn `<Tabs>` with two tabs: **"Defaults"** and **"Custom (N)"**
-- Custom tab shows count badge
-- Each tab renders the same card grid
-- The "Custom" tab empty state shows:
-  - Sparkles icon
-  - "Create your first custom unit"
-  - CTA button that opens the drawer
-  - If backend not connected: show connection instructions instead
+The user's skeleton has this structure (visible in their screenshot):
+```text
+Tiberian Sun Client/
+  INI/           <-- rules.ini and art.ini live HERE
+  MIX/           <-- game MIX archives
+  game.exe
+```
 
-### Reduce animation stagger
-- Change `transition={{ delay: index * 0.05 }}` to `transition={{ delay: Math.min(index * 0.03, 0.3) }}` to cap max stagger at 300ms regardless of unit count
+The export code:
+1. Finds `rules.ini` via regex (matches `INI/rules.ini`)
+2. Reads and merges custom units into it
+3. Writes the result to `${gameRoot}rules.ini` (the ROOT)
 
-### UnitCard touch improvements
-- Always show the gear (edit) button on mobile (detect via `useIsMobile` hook already in project)
-- Add `aria-label` to checkbox, edit button, and card itself
-- Add keyboard focus ring styling to the card
+This creates TWO copies: the **unmodified** original at `INI/rules.ini` and the **merged** version at root `rules.ini`. TS Client reads from the `INI/` folder, so it never sees the custom unit registrations.
 
----
-
-## Deliverable 5: Admin Forge Layout + Extracted RenameDialog
-
-### Extract RenameUnitDialog (`src/components/admin/RenameUnitDialog.tsx`)
-Move the rename overlay from AdminForge.tsx into its own component using Shadcn `<Dialog>`:
-- Props: `unit: ForgeUnit | null`, `open: boolean`, `onOpenChange`, `onRenamed`
-- Uses the existing `renameUnit()` from `src/lib/renameUnit.ts`
-- Includes the live preview of file name changes
-- Adds validation: warn if new name collides with `ORIGINAL_GAME_UNITS`
-
-### Split layout for AdminForge (`src/pages/AdminForge.tsx`)
-On desktop (>1024px), use a two-column layout:
-- **Left column (320px fixed):** Minted units list with search input at top, scrollable list
-- **Right column (flex-1):** The creation/edit tabs + INI preview + mint button
-
-On mobile: stack vertically (list on top, collapsible; editor below).
-
-Implementation uses CSS grid: `grid-cols-1 lg:grid-cols-[320px_1fr]`
-
-### Validation hints before mutation
-- In the mint button area, show inline warnings:
-  - If `internalName` is empty: "Internal name required"
-  - If `internalName` length > 8: "Max 8 characters for SHP compatibility"
-  - If name matches `ORIGINAL_GAME_UNITS`: amber warning badge
+**Fix:** Write the modified INI files back to their **original paths** within the ZIP (the same path the regex matched), not to the root.
 
 ---
 
-## Files Modified
+## Changes Required
 
-| File | Action |
-|---|---|
-| `src/components/ui/segmented-control.tsx` | New -- shared segmented control |
-| `src/components/FactionTabs.tsx` | Rewrite to use SegmentedControl |
-| `src/components/CategoryTabs.tsx` | Rewrite to use SegmentedControl |
-| `src/components/Header.tsx` | Add sticky, status chips, nav link, CTA |
-| `src/components/ExportSection.tsx` | Add sticky, condense, readiness checks |
-| `src/components/FilterBar.tsx` | New -- search + sort + count |
-| `src/components/UnitGrid.tsx` | Convert to tabbed layout, reduce stagger, a11y |
-| `src/components/UnitCard.tsx` | Touch-friendly actions, ARIA labels, focus ring |
-| `src/store/useUnitSelection.ts` | Add search/sort state |
-| `src/pages/Index.tsx` | Add FilterBar, remove FAB, adjust layout |
-| `src/components/FloatingActionButton.tsx` | Delete |
-| `src/components/admin/RenameUnitDialog.tsx` | New -- extracted dialog |
-| `src/pages/AdminForge.tsx` | Split layout, use RenameUnitDialog, validation hints |
+### 1. `src/lib/mixBuilder.ts`
+- Add CRC32 lookup table and replace `mixHash()` with CRC32 implementation
+- Add 4-byte flags prefix (`0x00000000`) before the file count in `buildEcacheMix()`
+- Update header size from 6 to 10
+- Update all offset calculations accordingly
 
-## No dependency changes needed
-All UI elements use existing Shadcn components, Framer Motion, Lucide icons, and Zustand.
+### 2. `src/hooks/useGameExport.ts`
+- Store the matched file paths from the regex search (e.g., `INI/rules.ini`, `INI/art.ini`)
+- Write modified INI files back to their original paths instead of `${gameRoot}rules.ini`
+- Add debug log entries for file placement decisions
+
+### 3. `src/lib/__tests__/mixBuilder.test.ts`
+- Update expected byte offsets: header is now 10 bytes (was 6)
+- Update total size calculations
+- Add a test verifying the 4-byte flags prefix is `0x00000000`
+- Add a test verifying CRC32 hash output for known filenames
+
+### 4. `src/lib/__tests__/exportPipeline.test.ts`
+- Update MIX size expectations from `6 + ...` to `10 + ...`
+- Keep all other assertions unchanged
+
+---
+
+## Technical Details: CRC32 Implementation
+
+A self-contained CRC32 function using the standard polynomial, no external dependency needed:
+
+```text
+1. Pre-compute a 256-entry lookup table from polynomial 0xEDB88320
+2. For each character in the uppercase filename:
+   - XOR the low byte of the running CRC with the character
+   - Look up the result in the table
+   - XOR with the CRC shifted right by 8
+3. Final XOR with 0xFFFFFFFF
+4. Return as unsigned 32-bit integer
+```
+
+---
+
+## Why This Fixes "Crash on Spawn" and "No Units Shown"
+
+| Symptom | Root Cause | Fix |
+|---------|-----------|-----|
+| Game crashes on spawn | MIX header missing 4-byte flags; game misreads entire archive | Add flags prefix |
+| Sprites/icons blank | Wrong hash in MIX index; game can't find files | Switch to CRC32 |
+| Units not in build menu | Modified rules.ini written to wrong path; game reads unmodified copy from INI/ folder | Write back to original path |
 
