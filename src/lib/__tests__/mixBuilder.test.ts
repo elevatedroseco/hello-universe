@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildEcacheMix, MixFileEntry } from '../mixBuilder';
+import { buildEcacheMix, MixFileEntry, mixHash } from '../mixBuilder';
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -8,6 +8,28 @@ function makeEntry(name: string, content: string): MixFileEntry {
   return { name, data: encoder.encode(content).buffer };
 }
 
+// ─── CRC32 hash ─────────────────────────────────────────
+
+describe('mixHash (CRC32)', () => {
+  it('produces consistent hashes for the same filename', () => {
+    expect(mixHash('TEST.SHP')).toBe(mixHash('TEST.SHP'));
+  });
+
+  it('uppercases input automatically', () => {
+    expect(mixHash('test.shp')).toBe(mixHash('TEST.SHP'));
+  });
+
+  it('produces different hashes for different filenames', () => {
+    expect(mixHash('A.SHP')).not.toBe(mixHash('B.SHP'));
+  });
+
+  it('returns a non-zero unsigned 32-bit value', () => {
+    const h = mixHash('ZOMBIE.SHP');
+    expect(h).toBeGreaterThan(0);
+    expect(h).toBeLessThanOrEqual(0xFFFFFFFF);
+  });
+});
+
 // ─── buildEcacheMix() ───────────────────────────────────
 
 describe('buildEcacheMix', () => {
@@ -15,19 +37,26 @@ describe('buildEcacheMix', () => {
     expect(() => buildEcacheMix([])).toThrow('Cannot build MIX with zero files');
   });
 
+  it('starts with 4-byte flags field set to 0', () => {
+    const entry = makeEntry('TEST.SHP', 'hello');
+    const mix = buildEcacheMix([entry]);
+    const view = new DataView(mix.buffer);
+
+    // First 4 bytes = flags = 0x00000000
+    expect(view.getUint32(0, true)).toBe(0);
+  });
+
   it('builds a valid MIX binary from one file', () => {
     const entry = makeEntry('TEST.SHP', 'hello');
     const mix = buildEcacheMix([entry]);
     const view = new DataView(mix.buffer);
 
-    // Header: file count = 1
-    expect(view.getUint16(0, true)).toBe(1);
+    // Header: flags(4) + filecount(2) + datasize(4) = 10
+    expect(view.getUint16(4, true)).toBe(1);  // file count at offset 4
+    expect(view.getUint32(6, true)).toBe(5);  // data size at offset 6
 
-    // Header: data size = 5 ("hello")
-    expect(view.getUint32(2, true)).toBe(5);
-
-    // Total size = 6 (header) + 12 (1 index entry) + 5 (data) = 23
-    expect(mix.length).toBe(23);
+    // Total size = 10 (header) + 12 (1 index entry) + 5 (data) = 27
+    expect(mix.length).toBe(27);
   });
 
   it('builds a valid MIX with multiple files', () => {
@@ -38,14 +67,14 @@ describe('buildEcacheMix', () => {
     const mix = buildEcacheMix(files);
     const view = new DataView(mix.buffer);
 
-    expect(view.getUint16(0, true)).toBe(2);
-    expect(view.getUint32(2, true)).toBe(9); // 3 + 6
+    expect(view.getUint16(4, true)).toBe(2);
+    expect(view.getUint32(6, true)).toBe(9); // 3 + 6
 
-    // Total = 6 + 24 (2*12) + 9 = 39
-    expect(mix.length).toBe(39);
+    // Total = 10 + 24 (2*12) + 9 = 43
+    expect(mix.length).toBe(43);
   });
 
-  it('sorts index entries by hash ascending', () => {
+  it('sorts index entries by CRC32 hash ascending', () => {
     const files = [
       makeEntry('Z.SHP', 'z'),
       makeEntry('A.SHP', 'a'),
@@ -53,9 +82,9 @@ describe('buildEcacheMix', () => {
     const mix = buildEcacheMix(files);
     const view = new DataView(mix.buffer);
 
-    // Read the two hashes from the index
-    const hash1 = view.getUint32(6, true);
-    const hash2 = view.getUint32(18, true);
+    // Index starts at offset 10
+    const hash1 = view.getUint32(10, true);
+    const hash2 = view.getUint32(22, true);
 
     expect(hash1).toBeLessThanOrEqual(hash2);
   });
@@ -65,8 +94,8 @@ describe('buildEcacheMix', () => {
     const entry = makeEntry('T.SHP', content);
     const mix = buildEcacheMix([entry]);
 
-    // Data starts at offset 6 (header) + 12 (index) = 18
-    const dataBytes = mix.slice(18);
+    // Data starts at offset 10 (header) + 12 (index) = 22
+    const dataBytes = mix.slice(22);
     const decoded = new TextDecoder().decode(dataBytes);
     expect(decoded).toBe(content);
   });
@@ -77,7 +106,7 @@ describe('buildEcacheMix', () => {
     const mix = buildEcacheMix([entry]);
 
     const view = new DataView(mix.buffer);
-    expect(view.getUint32(2, true)).toBe(4);
-    expect(mix.length).toBe(6 + 12 + 4);
+    expect(view.getUint32(6, true)).toBe(4);
+    expect(mix.length).toBe(10 + 12 + 4);
   });
 });

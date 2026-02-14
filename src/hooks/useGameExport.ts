@@ -431,8 +431,13 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       const finalArt = TiberianSunINIParser.stringify(withArtDefs);
       debugLog.push('Merged art.ini with art definitions (Image, Cameo, AltCameo)');
 
-      zip.file(`${gameRoot}rules.ini`, finalRules);
-      zip.file(`${gameRoot}art.ini`, finalArt);
+      // Write back to original paths so TS Client finds the modified files
+      const rulesPath = rulesMatches[0].name;
+      const artPath = artMatches[0].name;
+      zip.file(rulesPath, finalRules);
+      zip.file(artPath, finalArt);
+      debugLog.push(`Wrote merged rules.ini to: ${rulesPath}`);
+      debugLog.push(`Wrote merged art.ini to: ${artPath}`);
 
       // Download assets
       setExportProgress(55, 'Downloading unit graphics...');
