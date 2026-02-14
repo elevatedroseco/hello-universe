@@ -155,6 +155,38 @@ export const VALIDATION_RULES: ValidationRule[] = [
     },
   },
   {
+    id: 'image-exists',
+    name: 'Unit graphics present',
+    severity: 'error',
+    check: (unit) => {
+      if (unit.renderType === 'SHP' && !unit.shpFilePath) {
+        return {
+          pass: false,
+          message: 'SHP units require a sprite file. Upload unit SHP or switch to voxel.',
+          field: 'shp_file_path',
+        };
+      }
+      return { pass: true };
+    },
+  },
+  {
+    id: 'speed-range',
+    name: 'Speed value range',
+    severity: 'warning',
+    check: (unit) => {
+      if (unit.category === 'Structure') return { pass: true };
+      if (unit.speed < 1 || unit.speed > 15) {
+        return {
+          pass: false,
+          message: `Speed ${unit.speed} is unusual. Normal range: 2-12 (2=slow, 5=normal, 10=fast).`,
+          suggestion: '5',
+          field: 'speed',
+        };
+      }
+      return { pass: true };
+    },
+  },
+  {
     id: 'cameo-naming',
     name: 'Cameo naming convention',
     severity: 'info',
