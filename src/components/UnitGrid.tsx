@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, AlertTriangle, Plus, Search, X } from 'lucide-react';
+import { Sparkles, AlertTriangle, Plus, Search, X, Loader2 } from 'lucide-react';
+import { UnitGridSkeleton } from './UnitCardSkeleton';
 import { toast } from 'sonner';
 
 interface UnitGridProps {
@@ -42,7 +43,7 @@ function matchesSearch(unit: { internalName: string; displayName: string }, quer
 
 export const UnitGrid = ({ customUnits = [], isConfigMissing = false }: UnitGridProps) => {
   const { activeFaction, activeCategory, searchQuery, sortBy, setSearchQuery, setDrawerOpen } = useUnitSelection();
-  const { updateUnit, isUpdating } = useCustomUnits();
+  const { updateUnit, isUpdating, isLoading } = useCustomUnits();
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
 
@@ -128,8 +129,10 @@ export const UnitGrid = ({ customUnits = [], isConfigMissing = false }: UnitGrid
       {/* Filter Bar */}
       <FilterBar unitCount={totalCount} />
 
-      {/* No results */}
-      {noResults ? (
+      {/* Loading state */}
+      {isLoading ? (
+        <UnitGridSkeleton count={10} />
+      ) : noResults ? (
         <div className="text-center py-16 space-y-3">
           <Search className="w-8 h-8 mx-auto text-muted-foreground" />
           <p className="text-muted-foreground">
