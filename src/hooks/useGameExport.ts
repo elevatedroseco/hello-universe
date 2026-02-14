@@ -157,6 +157,7 @@ function generateMapModBlock(units: CustomUnit[]): string {
 async function downloadUnitAssets(
   selectedUnits: CustomUnit[],
   setExportProgress: (p: number, m: string) => void,
+  debugLog: string[],
 ): Promise<{ shpFiles: MixFileEntry[]; vxlFiles: MixFileEntry[] }> {
   const shpFiles: MixFileEntry[] = [];
   const vxlFiles: MixFileEntry[] = [];
@@ -165,40 +166,53 @@ async function downloadUnitAssets(
 
   for (const unit of selectedUnits) {
     setExportProgress(Math.floor(progress), `Packaging ${unit.displayName}...`);
+    const unitName = unit.internalName.toUpperCase();
     const isVoxel = unit.renderType === 'VOXEL';
 
     if (isVoxel) {
       if (unit.voxelFilePath) {
         const blob = await downloadFromStorage(unit.voxelFilePath);
         if (blob) {
-          const name = unit.internalName.substring(0, 8).toUpperCase() + '.VXL';
+          const name = unitName.substring(0, 8) + '.VXL';
           vxlFiles.push({ name, data: await blob.arrayBuffer() });
+          debugLog.push(`Added ${name} (${blob.size} bytes)`);
+        } else {
+          debugLog.push(`FAILED to download VXL for ${unitName}`);
         }
       }
       if (unit.hvaFilePath) {
         const blob = await downloadFromStorage(unit.hvaFilePath);
         if (blob) {
-          const name = unit.internalName.substring(0, 8).toUpperCase() + '.HVA';
+          const name = unitName.substring(0, 8) + '.HVA';
           vxlFiles.push({ name, data: await blob.arrayBuffer() });
+          debugLog.push(`Added ${name} (${blob.size} bytes)`);
         }
       }
       if (unit.turretVxlPath) {
         const blob = await downloadFromStorage(unit.turretVxlPath);
         if (blob) {
-          vxlFiles.push({ name: unit.internalName.substring(0, 5).toUpperCase() + 'TUR.VXL', data: await blob.arrayBuffer() });
+          const name = unitName.substring(0, 5) + 'TUR.VXL';
+          vxlFiles.push({ name, data: await blob.arrayBuffer() });
+          debugLog.push(`Added ${name} (${blob.size} bytes)`);
         }
       }
       if (unit.barrelVxlPath) {
         const blob = await downloadFromStorage(unit.barrelVxlPath);
         if (blob) {
-          vxlFiles.push({ name: unit.internalName.substring(0, 4).toUpperCase() + 'BARL.VXL', data: await blob.arrayBuffer() });
+          const name = unitName.substring(0, 4) + 'BARL.VXL';
+          vxlFiles.push({ name, data: await blob.arrayBuffer() });
+          debugLog.push(`Added ${name} (${blob.size} bytes)`);
         }
       }
     } else {
       if (unit.shpFilePath) {
         const blob = await downloadFromStorage(unit.shpFilePath);
         if (blob) {
-          shpFiles.push({ name: unit.internalName.substring(0, 8).toUpperCase() + '.SHP', data: await blob.arrayBuffer() });
+          const spriteName = unitName + '.SHP';
+          shpFiles.push({ name: spriteName, data: await blob.arrayBuffer() });
+          debugLog.push(`Added ${spriteName} (${blob.size} bytes)`);
+        } else {
+          debugLog.push(`FAILED to download SHP for ${unitName}`);
         }
       }
     }
@@ -206,7 +220,11 @@ async function downloadUnitAssets(
     if (unit.icon_file_path) {
       const blob = await downloadFromStorage(unit.icon_file_path);
       if (blob) {
-        shpFiles.push({ name: (unit.internalName.substring(0, 4) + 'ICON').toUpperCase() + '.SHP', data: await blob.arrayBuffer() });
+        const iconName = unitName + 'ICON.SHP';
+        shpFiles.push({ name: iconName, data: await blob.arrayBuffer() });
+        debugLog.push(`Added ${iconName} (${blob.size} bytes)`);
+      } else {
+        debugLog.push(`FAILED to download icon for ${unitName}`);
       }
     }
 
@@ -294,8 +312,7 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
 
     try {
       setExporting(true);
-
-      // Check for name collisions with base game
+      const debugLog: string[] = [`Export started: ${new Date().toISOString()}`, `Mode: ${mode}`, `Units: ${selectedUnits.map(u => u.internalName.toUpperCase()).join(', ')}`];
       const conflicts = selectedUnits.filter(u =>
         ORIGINAL_GAME_UNITS.has(u.internalName.toUpperCase())
       );
@@ -322,9 +339,10 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       if (mode === 'mod-only') {
         setExportProgress(10, 'Generating mod files...');
         const { rules, art } = generateModOnlyINI(selectedUnits);
+        debugLog.push('Generated mod-only rules.ini and art.ini');
 
         setExportProgress(40, 'Downloading unit graphics...');
-        const { shpFiles, vxlFiles } = await downloadUnitAssets(selectedUnits, setExportProgress);
+        const { shpFiles, vxlFiles } = await downloadUnitAssets(selectedUnits, setExportProgress, debugLog);
 
         setExportProgress(75, 'Building package...');
         const zip = new JSZip();
@@ -333,11 +351,17 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
 
         if (shpFiles.length > 0) {
           zip.file('ecache99.mix', buildEcacheMix(shpFiles));
+          debugLog.push(`Built ecache99.mix with ${shpFiles.length} files: ${shpFiles.map(f => f.name).join(', ')}`);
         }
         if (vxlFiles.length > 0) {
           zip.file('expand99.mix', buildEcacheMix(vxlFiles));
+          debugLog.push(`Built expand99.mix with ${vxlFiles.length} files: ${vxlFiles.map(f => f.name).join(', ')}`);
         }
         zip.file('MOD_README.txt', generateReadme(selectedUnits, 'mod-only'));
+
+        // Debug log
+        debugLog.push(`Export complete: ${new Date().toISOString()}`);
+        zip.file('export_debug_log.txt', debugLog.join('\n'));
 
         setExportProgress(85, 'Compressing...');
         const blob = await zip.generateAsync(
@@ -398,34 +422,40 @@ export const useGameExport = (customUnits: CustomUnit[]) => {
       const withLists = TiberianSunINIParser.injectUnits(rulesData, selectedUnits);
       const withDefs = TiberianSunINIParser.addUnitDefinitions(withLists, selectedUnits);
       const finalRules = TiberianSunINIParser.stringify(withDefs);
+      debugLog.push('Merged rules.ini with unit definitions and type lists');
 
       // Parse + inject art
       setExportProgress(50, 'Merging art definitions...');
       const artData = TiberianSunINIParser.parse(originalArt);
       const withArtDefs = TiberianSunINIParser.addArtDefinitions(artData, selectedUnits);
       const finalArt = TiberianSunINIParser.stringify(withArtDefs);
+      debugLog.push('Merged art.ini with art definitions (Image, Cameo, AltCameo)');
 
       zip.file(`${gameRoot}rules.ini`, finalRules);
       zip.file(`${gameRoot}art.ini`, finalArt);
 
       // Download assets
       setExportProgress(55, 'Downloading unit graphics...');
-      const { shpFiles, vxlFiles } = await downloadUnitAssets(selectedUnits, setExportProgress);
+      const { shpFiles, vxlFiles } = await downloadUnitAssets(selectedUnits, setExportProgress, debugLog);
 
       // Build MIX files
       if (shpFiles.length > 0) {
         setExportProgress(80, `Building ecache99.mix (${shpFiles.length} sprites)...`);
         const mixData = buildEcacheMix(shpFiles);
         zip.file(`${gameRoot}ecache99.mix`, mixData);
+        debugLog.push(`Built ecache99.mix with ${shpFiles.length} files: ${shpFiles.map(f => f.name).join(', ')}`);
       }
       if (vxlFiles.length > 0) {
         setExportProgress(83, `Building expand99.mix (${vxlFiles.length} voxel files)...`);
         zip.file(`${gameRoot}expand99.mix`, buildEcacheMix(vxlFiles));
+        debugLog.push(`Built expand99.mix with ${vxlFiles.length} files: ${vxlFiles.map(f => f.name).join(', ')}`);
       }
 
-      // README
+      // README + debug log
       setExportProgress(88, 'Writing installation guide...');
       zip.file(`${gameRoot}MOD_README.txt`, generateReadme(selectedUnits, 'standalone'));
+      debugLog.push(`Export complete: ${new Date().toISOString()}`);
+      zip.file(`${gameRoot}export_debug_log.txt`, debugLog.join('\n'));
 
       // Compress + download
       setExportProgress(90, 'Compressing final package...');
