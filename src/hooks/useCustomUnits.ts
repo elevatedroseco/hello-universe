@@ -30,16 +30,26 @@ const capitalize = (str: string): string =>
 const transformToCustomUnit = (row: Record<string, unknown>): CustomUnit => {
   const rules = (row.rules_json as Record<string, unknown>) || {};
   
-  const rawCategory = (rules.Category as string) || (rules.category as string) || 'Infantry';
+  const rawCategory = (row.category as string) || (rules.Category as string) || 'Infantry';
   const rawFaction = (rules.Owner as string) || (rules.owner as string) || 'GDI';
   
+  // Normalize category — database stores exact values like 'Structure', 'Infantry', etc.
+  const normalizeCategory = (cat: string): string => {
+    const lower = cat.toLowerCase();
+    if (lower === 'structure' || lower === 'support') return 'Structure';
+    if (lower === 'infantry' || lower === 'soldier') return 'Infantry';
+    if (lower === 'vehicle' || lower === 'afv') return 'Vehicle';
+    if (lower === 'aircraft' || lower === 'airpower') return 'Aircraft';
+    return capitalize(cat);
+  };
+
   return {
     id: row.id as string,
     type: 'custom',
     internalName: row.internal_name as string,
     displayName: row.name as string,
     faction: rawFaction as Faction,
-    category: capitalize(rawCategory) as UnitCategory,
+    category: normalizeCategory(rawCategory) as UnitCategory,
     cost: (rules.Cost as number) || (rules.cost as number) || 0,
     strength: (rules.Strength as number) || (rules.strength as number) || 0,
     speed: (rules.Speed as number) || (rules.speed as number) || 0,
@@ -55,6 +65,14 @@ const transformToCustomUnit = (row: Record<string, unknown>): CustomUnit => {
     rulesJson: rules,
     artJson: row.art_json as Record<string, unknown> | undefined,
     creatorNotes: row.creator_notes as string | undefined,
+    // Structure-specific
+    foundation: row.foundation as string | undefined,
+    power: row.power as number | undefined,
+    powerDrain: row.power_drain as number | undefined,
+    buildCat: row.build_cat as string | undefined,
+    isFactory: row.is_factory as boolean | undefined,
+    hasBib: row.has_bib as boolean | undefined,
+    buildupFilePath: row.buildup_file_path as string | undefined,
     createdAt: row.created_at as string | undefined,
     updatedAt: row.updated_at as string | undefined,
   };

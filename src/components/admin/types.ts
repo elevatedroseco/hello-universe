@@ -5,7 +5,7 @@ export interface UnitForm {
   internalName: string;
   displayName: string;
   faction: 'GDI' | 'Nod' | 'Mutant';
-  category: 'Infantry' | 'Vehicle' | 'Aircraft';
+  category: 'Infantry' | 'Vehicle' | 'Aircraft' | 'Structure';
 
   // Render type
   renderType: RenderType;
@@ -46,6 +46,14 @@ export interface UnitForm {
   hasBarrel: boolean;
   turretOffset: number;
 
+  // Structure-specific
+  foundation: string;
+  power: number;
+  powerDrain: number;
+  buildCat: string;
+  isFactory: boolean;
+  hasBib: boolean;
+
   // Voice
   voicePreset: string;
   voiceSelect: string;
@@ -60,6 +68,7 @@ export interface UnitForm {
   hvaFile: File | null;
   turretVxlFile: File | null;
   barrelVxlFile: File | null;
+  buildupFile: File | null;
 }
 
 export const DEFAULT_FORM: UnitForm = {
@@ -99,10 +108,17 @@ export const DEFAULT_FORM: UnitForm = {
   voiceMove: '15-I006,15-I010',
   voiceAttack: '15-I020,15-I022',
   voiceFeedback: '15-I058',
+  foundation: '3x2',
+  power: 0,
+  powerDrain: 0,
+  buildCat: 'GDIBUILDING',
+  isFactory: false,
+  hasBib: false,
   spriteFile: null,
   iconFile: null,
   vxlFile: null,
   hvaFile: null,
   turretVxlFile: null,
   barrelVxlFile: null,
+  buildupFile: null,
 };

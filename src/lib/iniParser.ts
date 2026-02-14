@@ -361,6 +361,21 @@ export class TiberianSunINIParser {
           Landable: 'yes',
           Locomotor: '{4A582744-9839-11d1-B709-00A024DDAFD1}',
         });
+      } else if (unit.category === 'Structure') {
+        Object.assign(modified[unitName], {
+          Category: String(rules.Category || 'Support'),
+          BaseNormal: 'yes',
+          IsBase: 'yes',
+          Power: String(rules.Power ?? unit.power ?? 0),
+          PowerDrain: String(rules.PowerDrain ?? unit.powerDrain ?? 0),
+          BuildCat: String(rules.BuildCat ?? unit.buildCat ?? 'GDIBUILDING'),
+        });
+        if (rules.IsFactory || unit.isFactory) {
+          modified[unitName].Factory = 'InfantryType';
+        }
+        if (rules.Bib || unit.hasBib) {
+          modified[unitName].Bib = 'yes';
+        }
       }
 
       // Override locomotor if explicitly set in rulesJson
@@ -444,7 +459,7 @@ export class TiberianSunINIParser {
             Crawler: 'no',
             Remapable: 'yes'
           });
-        } else if (unit.category === 'Vehicle') {
+      } else if (unit.category === 'Vehicle') {
           Object.assign(artBlock, {
             Voxel: 'no',
             Shadow: 'yes',
@@ -458,6 +473,15 @@ export class TiberianSunINIParser {
             Rotors: 'yes',
             PitchSpeed: '0.5'
           });
+        } else if (unit.category === 'Structure') {
+          Object.assign(artBlock, {
+            Foundation: String(art.Foundation || unit.foundation || '3x2'),
+            Remapable: 'yes',
+            NewTheater: 'yes',
+          });
+          if (art.Buildup) {
+            artBlock.Buildup = String(art.Buildup);
+          }
         }
 
         artBlock.SecondaryFireOffset = '0,0,0';

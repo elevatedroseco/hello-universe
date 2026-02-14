@@ -15,13 +15,17 @@ function generatePreview(form: UnitForm): string {
   const loco = TS_LOCOMOTORS.find((l) => l.id === form.locomotor)?.guid || '';
   const cameoId = (form.internalName.substring(0, 4) + 'ICON').toUpperCase();
   const isVoxel = form.renderType === 'VOXEL';
-  const listType = form.category === 'Infantry'
-    ? 'InfantryTypes'
-    : form.category === 'Aircraft'
-      ? 'AircraftTypes'
-      : 'VehicleTypes';
+  const isStructure = form.category === 'Structure';
 
-  const rulesSection = `; Preview — what will be added to rules.ini
+  const listType = isStructure
+    ? 'BuildingTypes'
+    : form.category === 'Infantry'
+      ? 'InfantryTypes'
+      : form.category === 'Aircraft'
+        ? 'AircraftTypes'
+        : 'VehicleTypes';
+
+  let rulesSection = `; Preview — what will be added to rules.ini
 ; ================================================
 
 [${listType}]
@@ -33,6 +37,26 @@ Cost=${form.cost}
 Strength=${form.strength}
 Armor=${form.armor}
 TechLevel=${form.techLevel}
+Owner=${form.faction}
+Image=${form.internalName || 'MYUNIT'}
+Points=${form.points}`;
+
+  if (isStructure) {
+    rulesSection += `
+Sight=${form.sight}
+Prerequisite=${form.prerequisite}
+Power=${form.power}
+PowerDrain=${form.powerDrain}
+BuildCat=${form.buildCat}
+BaseNormal=yes
+IsBase=yes`;
+    if (form.isFactory) rulesSection += '\nFactory=InfantryType';
+    if (form.hasBib) rulesSection += '\nBib=yes';
+    if (form.primaryWeapon && form.primaryWeapon !== 'None') {
+      rulesSection += `\nPrimary=${form.primaryWeapon}`;
+    }
+  } else {
+    rulesSection += `
 Speed=${form.speed}
 Sight=${form.sight}
 Primary=${form.primaryWeapon}${form.eliteWeapon ? '\nElite=' + form.eliteWeapon : ''}
@@ -40,16 +64,25 @@ ROT=${form.rof}
 Range=${form.range}
 Prerequisite=${form.prerequisite}
 Locomotor=${loco}
-Owner=${form.faction}
-Image=${form.internalName || 'MYUNIT'}
-Points=${form.points}
 Crushable=${form.crushable ? 'yes' : 'no'}${form.cloakable ? '\nCloakable=yes' : ''}${form.sensors ? '\nSensors=yes' : ''}${form.fearless ? '\nFearless=yes' : ''}${form.tiberiumHeal ? '\nTiberiumHeal=yes' : ''}${isVoxel && form.hasTurret ? '\nTurret=yes' : ''}
 VoiceSelect=${form.voiceSelect}
 VoiceMove=${form.voiceMove}
 VoiceAttack=${form.voiceAttack}`;
+  }
 
-  const artSection = isVoxel
-    ? `
+  let artSection: string;
+  if (isStructure) {
+    artSection = `
+; ================================================
+; art.ini addition:
+
+[${form.internalName || 'MYUNIT'}]
+Foundation=${form.foundation}
+Remapable=yes
+NewTheater=yes
+Cameo=${cameoId}`;
+  } else if (isVoxel) {
+    artSection = `
 ; ================================================
 ; art.ini addition:
 
@@ -61,8 +94,9 @@ Normalized=yes
 Cameo=${cameoId}
 PrimaryFireFLH=${form.primaryFireFLH}
 SecondaryFireFLH=${form.secondaryFireFLH}${form.hasTurret ? '\nTurret=yes\nTurretOffset=' + form.turretOffset : ''}
-`
-    : `
+`;
+  } else {
+    artSection = `
 ; ================================================
 ; art.ini addition:
 
@@ -70,6 +104,7 @@ SecondaryFireFLH=${form.secondaryFireFLH}${form.hasTurret ? '\nTurret=yes\nTurre
 Image=${form.internalName || 'MYUNIT'}
 Cameo=${cameoId}${form.category === 'Infantry' ? '\nSequence=' + form.sequence : ''}
 `;
+  }
 
   return rulesSection + artSection;
 }
